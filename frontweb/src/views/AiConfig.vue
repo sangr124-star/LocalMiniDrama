@@ -3,8 +3,8 @@
     <header class="header">
       <div class="header-inner">
         <h1 class="logo" @click="goList">
-          <span class="logo-main">本地短剧助手</span>
-          <span class="logo-sub">LocalMiniDrama</span>
+          <img src="/favicon.svg" alt="AI漫剧" class="logo-icon" />
+          <span class="logo-main">AI漫剧</span>
         </h1>
         <span class="page-title">AI 配置</span>
         <el-button class="btn-back" @click="goList">
@@ -73,16 +73,18 @@ html.light .header {
   margin: 0;
   cursor: pointer;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
   line-height: 1;
   transition: filter 0.3s;
 }
 .logo:hover {
   filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.5));
 }
+.logo-icon { width: 26px; height: 26px; display: block; filter: drop-shadow(0 2px 6px rgba(124, 92, 255, 0.4)); }
 .logo-main {
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   font-weight: 700;
   background: linear-gradient(135deg, #c4b5fd 0%, #818cf8 50%, #a78bfa 100%);
   -webkit-background-clip: text;

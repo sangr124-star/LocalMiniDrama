@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7c5cff"/>
+      <stop offset="100%" stop-color="#b045ff"/>
+    </linearGradient>
+  </defs>
+  <!-- 圆角紫色背景 -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bg)"/>
+  <!-- 对话气泡（漫画/剧情元素） -->
+  <path d="M14 18 Q14 14 18 14 H46 Q50 14 50 18 V36 Q50 40 46 40 H32 L24 48 V40 H18 Q14 40 14 36 Z"
+        fill="#ffffff" opacity="0.15"/>
+  <!-- AI 字样 -->
+  <text x="32" y="38" text-anchor="middle"
+        font-family="'Segoe UI', 'PingFang SC', system-ui, sans-serif"
+        font-size="22" font-weight="800" fill="#ffffff" letter-spacing="-1">AI</text>
+</svg>
