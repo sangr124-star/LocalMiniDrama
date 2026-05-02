@@ -772,7 +772,19 @@ function finalizeEpisode(db, log, episodeId, baseUrl, body = {}) {
   const mergeId = created.merge_id || created.id;
   db.prepare('UPDATE episodes SET status = ? WHERE id = ?').run('processing', episodeId);
   setImmediate(() => {
-    videoMergeService.processVideoMerge(db, log, mergeId, baseUrl);
+    Promise.resolve()
+      .then(() => videoMergeService.processVideoMerge(db, log, mergeId, baseUrl))
+      .catch((err) => {
+        const msg = (err && err.message) || String(err);
+        log.errorw('processVideoMerge crashed', { merge_id: mergeId, episode_id: episodeId, error: msg });
+        try {
+          db.prepare('UPDATE video_merges SET status = ?, error_msg = ? WHERE id = ?').run('failed', msg.slice(0, 500), mergeId);
+        } catch (_) {}
+        try {
+          const taskService = require('./taskService');
+          if (created.task_id) taskService.updateTaskError(db, created.task_id, msg.slice(0, 500));
+        } catch (_) {}
+      });
   });
   return {
     message: '视频合成任务已创建，正在后台处理',

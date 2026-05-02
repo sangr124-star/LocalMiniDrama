@@ -250,22 +250,29 @@ async function processVideoMerge(db, log, mergeId, baseUrl) {
     !!mergeOpts.burn_narration_subtitles
     || !!mergeOpts.burn_dialogue_audio
     || !!(mergeOpts.watermark_text && String(mergeOpts.watermark_text).trim());
+  let postProcessWarning = null;
   if (mergedRelativePath && ffmpegAvailable && postNeed) {
     const mergedAbsPath = path.join(storageRoot, mergedRelativePath.replace(/\//g, path.sep));
     if (fs.existsSync(mergedAbsPath)) {
-      const mergedPP = require('./mergedEpisodePostProcess');
-      const post = await mergedPP.runMergedEpisodePostProcess(db, log, {
-        mergedAbsPath,
-        storageRoot,
-        scenes,
-        episodeId,
-        mergeOpts,
-      });
-      if (post.ok && post.relativePath) {
-        mergedRelativePath = post.relativePath;
-        log.info('Video merge: merged episode post-process', { merge_id: mergeId, out: mergedRelativePath });
-      } else if (post.error && post.error !== 'NO_POST_OPTS') {
-        log.warn('Video merge: post-process skipped', { merge_id: mergeId, err: post.error });
+      try {
+        const mergedPP = require('./mergedEpisodePostProcess');
+        const post = await mergedPP.runMergedEpisodePostProcess(db, log, {
+          mergedAbsPath,
+          storageRoot,
+          scenes,
+          episodeId,
+          mergeOpts,
+        });
+        if (post.ok && post.relativePath) {
+          mergedRelativePath = post.relativePath;
+          log.info('Video merge: merged episode post-process', { merge_id: mergeId, out: mergedRelativePath });
+        } else if (post.error && post.error !== 'NO_POST_OPTS') {
+          postProcessWarning = post.error;
+          log.warn('Video merge: post-process skipped', { merge_id: mergeId, err: post.error });
+        }
+      } catch (e) {
+        postProcessWarning = (e && e.message) || String(e);
+        log.warn('Video merge: post-process threw, keeping base merged video', { merge_id: mergeId, err: postProcessWarning });
       }
     }
   }
@@ -275,9 +282,10 @@ async function processVideoMerge(db, log, mergeId, baseUrl) {
   }
 
   const finalMergedUrl = mergedRelativePath || mergedUrlFallback;
+  const finalErrMsg = postProcessWarning ? `主合并已完成，后处理跳过：${postProcessWarning}`.slice(0, 500) : null;
   db.prepare(
     'UPDATE video_merges SET status = ?, merged_url = ?, duration = ?, completed_at = ?, error_msg = ? WHERE id = ?'
-  ).run('completed', finalMergedUrl, Math.round(totalDuration) || null, now, null, mergeId);
+  ).run('completed', finalMergedUrl, Math.round(totalDuration) || null, now, finalErrMsg, mergeId);
   db.prepare('UPDATE episodes SET video_url = ?, status = ?, updated_at = ? WHERE id = ?').run(finalMergedUrl, 'completed', now, episodeId);
   if (taskId) {
     taskService.updateTaskResult(db, taskId, { merge_id: mergeId, video_url: finalMergedUrl, duration: Math.round(totalDuration) });
