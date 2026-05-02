@@ -113,6 +113,79 @@ async function synthesizeWithOpenai(text, voice, apiKey, baseUrl, model, speed) 
 }
 
 /**
+ * 使用火山引擎 TTS（豆包语音合成）
+ * 文档：https://www.volcengine.com/docs/6561/79817
+ * 协议：POST https://openspeech.bytedance.com/api/v1/tts
+ *   - Authorization: "Bearer;{accessToken}"（注意是分号）
+ *   - body: { app:{appid,token,cluster}, user:{uid}, audio:{voice_type,encoding,...}, request:{reqid,text,...} }
+ *   - response: { code, message, data:base64 }   code===3000 success
+ * miniDrama 的 ai_service_configs 字段映射：
+ *   - api_key      → accessToken
+ *   - settings.appid    → appid（必填，由 settings JSON 传入）
+ *   - settings.cluster  → cluster（默认 volcano_tts）
+ *   - default_model     → 不使用（火山 TTS 用 voice_type 做模型）
+ *   - voice_id          → voice_type
+ */
+async function synthesizeWithVolcengine(text, voiceType, accessToken, appid, cluster, baseUrl, speed) {
+  if (!accessToken) throw new Error('火山 TTS 缺少 access token（在「API Key」字段填写）');
+  if (!appid) throw new Error('火山 TTS 缺少 appid（请在「声音 ID」下方的 settings JSON 中填 appid，或扩展前端添加输入框）');
+  const apiUrl = (baseUrl && baseUrl.trim())
+    ? baseUrl.replace(/\/+$/, '') + (baseUrl.includes('/api/v1/tts') ? '' : '/api/v1/tts')
+    : 'https://openspeech.bytedance.com/api/v1/tts';
+  const reqId = randomUUID();
+  const body = JSON.stringify({
+    app: { appid, token: accessToken, cluster: cluster || 'volcano_tts' },
+    user: { uid: 'minidrama_user' },
+    audio: {
+      voice_type: voiceType || 'zh_female_vv_uranus_bigtts',
+      encoding: 'mp3',
+      speed_ratio: Number(speed) || 1.0,
+      volume_ratio: 1.0,
+      pitch_ratio: 1.0,
+    },
+    request: { reqid: reqId, text, text_type: 'plain', operation: 'query' },
+  });
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(apiUrl);
+    const client = urlObj.protocol === 'https:' ? https : http;
+    const req = client.request(urlObj, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer;${accessToken}`,
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error(`火山 TTS HTTP ${res.statusCode}: ${raw.slice(0, 500)}`));
+          return;
+        }
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch (_) {
+          reject(new Error(`火山 TTS 返回非 JSON: ${raw.slice(0, 200)}`));
+          return;
+        }
+        if (parsed.code !== 3000) {
+          reject(new Error(`火山 TTS 失败 code=${parsed.code}: ${parsed.message || ''}`));
+          return;
+        }
+        if (!parsed.data) { reject(new Error('火山 TTS 未返回音频数据')); return; }
+        resolve(Buffer.from(parsed.data, 'base64'));
+      });
+    });
+    const timer = setTimeout(() => { req.destroy(); reject(new Error('火山 TTS 请求超时')); }, 120000);
+    req.on('error', (e) => { clearTimeout(timer); reject(e); });
+    req.on('close', () => clearTimeout(timer));
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
  * 合成 TTS 并保存到本地文件
  * @returns {{ local_path: string, audio_url: string }}
  */
@@ -144,8 +217,19 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
       groupId,
       ttsModel || 'speech-02-hd'
     );
+  } else if (provider === 'volcengine' || provider === 'volces' || provider === 'volc' || provider === 'volcengine_tts') {
+    const appid = ttsSettings.appid || ttsSettings.app_id || ttsConfig.app_id || '';
+    const cluster = ttsSettings.cluster || 'volcano_tts';
+    audioBuffer = await synthesizeWithVolcengine(
+      text,
+      voiceId || 'zh_female_vv_uranus_bigtts',
+      ttsConfig.api_key,
+      appid,
+      cluster,
+      ttsConfig.base_url,
+      finalSpeed
+    );
   } else if (provider === 'openai' || ttsConfig.base_url) {
-    console.log('==c sxy synthesizeWithOpenai', text, voiceId, ttsConfig.api_key, ttsConfig.base_url, ttsModel, finalSpeed);
     audioBuffer = await synthesizeWithOpenai(
       text,
       voiceId || 'alloy',
@@ -155,7 +239,7 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
       finalSpeed
     );
   } else {
-    throw new Error(`不支持的 TTS provider: ${provider}，目前支持 openai、minimax`);
+    throw new Error(`不支持的 TTS provider: ${provider}，目前支持 openai、minimax、volcengine`);
   }
 
   // 保存到本地

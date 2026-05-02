@@ -653,8 +653,21 @@ input_reference = (图片文件，可选)</pre>
                 <el-option label="male-zhicheng（知城）" value="male-zhicheng" />
                 <el-option label="audiobook_male_1（有声书）" value="audiobook_male_1" />
               </el-option-group>
+              <el-option-group label="火山 通用">
+                <el-option label="vivi 2.0（推荐女）" value="zh_female_vv_uranus_bigtts" />
+                <el-option label="云舟（推荐男）" value="zh_male_m191_uranus_bigtts" />
+                <el-option label="小何（女）" value="zh_female_xiaohe_uranus_bigtts" />
+                <el-option label="小天（男）" value="zh_male_taocheng_uranus_bigtts" />
+              </el-option-group>
+              <el-option-group label="火山 视频配音">
+                <el-option label="大壹（推荐男）" value="zh_male_dayi_saturn_bigtts" />
+                <el-option label="魅力女友（推荐女）" value="zh_female_meilinvyou_saturn_bigtts" />
+                <el-option label="鸡汤女" value="zh_female_jitangnv_saturn_bigtts" />
+                <el-option label="流畅女声" value="zh_female_santongyongns_saturn_bigtts" />
+                <el-option label="儒雅逸辰（男）" value="zh_male_ruyayichen_saturn_bigtts" />
+              </el-option-group>
             </el-select>
-            <p class="field-tip">MiniMax 必填；不填默认 female-shaonv。</p>
+            <p class="field-tip">MiniMax 默认 female-shaonv；火山默认 vivi 2.0。</p>
           </el-form-item>
           <el-form-item>
             <template #label>
@@ -673,6 +686,41 @@ input_reference = (图片文件，可选)</pre>
             <el-input v-model="form.group_id" placeholder="MiniMax GroupId，如 1234567890" />
             <p class="field-tip">仅 MiniMax T2A 需要此字段。</p>
           </el-form-item>
+          <!-- 火山 TTS 专属：AppID + Cluster -->
+          <template v-if="['volcengine','volces','volc'].includes(String(form.provider).toLowerCase())">
+            <el-form-item>
+              <template #label>
+                <span class="form-label-tip">AppID
+                  <el-tooltip placement="top" popper-class="cfg-tip-popper">
+                    <template #content>
+                      <div class="cfg-tip-content">
+                        火山引擎语音合成 AppID。<br>
+                        登录 <b>console.volcengine.com/speech</b> → 应用管理 → 即可查看。
+                      </div>
+                    </template>
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
+              <el-input v-model="form.app_id" placeholder="如 8207043341" />
+              <p class="field-tip">火山 TTS 必填。AccessToken 填在「API Key」字段。</p>
+            </el-form-item>
+            <el-form-item>
+              <template #label>
+                <span class="form-label-tip">Cluster
+                  <el-tooltip placement="top" popper-class="cfg-tip-popper">
+                    <template #content>
+                      <div class="cfg-tip-content">
+                        火山 TTS 集群标识，默认 volcano_tts；如使用大模型 TTS 可填 volcano_icl。
+                      </div>
+                    </template>
+                    <el-icon class="tip-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </span>
+              </template>
+              <el-input v-model="form.cluster" placeholder="volcano_tts" />
+            </el-form-item>
+          </template>
         </template>
 
         <!-- 端点配置：视频必填（自定义厂商）；图片/分镜在使用代理或特殊厂商时填写 -->
@@ -1107,6 +1155,9 @@ const form = ref({
   // TTS 专属字段
   voice_id: '',
   group_id: '',
+  // 火山 TTS 专属
+  app_id: '',
+  cluster: 'volcano_tts',
 })
 const presetModelPick = ref('')
 
@@ -1258,7 +1309,9 @@ const providerConfigs = {
     { id: 'xai', name: 'xAI Grok Imagine', models: ['grok-imagine-video'] },
   ],
   tts: [
+    { id: 'volcengine', name: '火山引擎（豆包语音合成）', models: ['volcano_tts'] },
     { id: 'minimax', name: 'MiniMax T2A', models: ['speech-02-hd', 'speech-02-turbo'] },
+    { id: 'openai', name: 'OpenAI 兼容', models: ['tts-1', 'tts-1-hd'] },
   ],
   jimeng2_character_auth: [
     { id: 'jimeng_material_api', name: '即梦业务素材 API（/api/business/v1）', models: ['-'] },
@@ -1492,7 +1545,12 @@ function onProviderChange(providerId) {
     form.value.default_model = ''
     return
   }
-  form.value.base_url = getBaseUrlForProvider(providerId)
+  // TTS + volcengine 用 openspeech 而不是 ark
+  if (st === 'tts' && ['volcengine','volces','volc'].includes(String(providerId).toLowerCase())) {
+    form.value.base_url = 'https://openspeech.bytedance.com'
+  } else {
+    form.value.base_url = getBaseUrlForProvider(providerId)
+  }
   form.value.modelText = (p.models || []).join('\n')
   form.value.default_model = (p.models && p.models[0]) || ''
   // 自动填充接口规范
@@ -1581,6 +1639,8 @@ function resetForm() {
     is_default: true,  // 新增时默认勾选「设为默认」，便于理解当前会使用哪条配置
     voice_id: '',
     group_id: '',
+    app_id: '',
+    cluster: 'volcano_tts',
     kling_access_key: '',
     kling_secret_key: '',
     kling_secret_key_base64: false,
@@ -1601,6 +1661,8 @@ function openEdit(row) {
   // TTS / 可灵 Omni 等从 settings 解析
   let voice_id = row.voice_id || ''
   let group_id = row.group_id || ''
+  let app_id = ''
+  let cluster = 'volcano_tts'
   let kling_access_key = ''
   let kling_secret_key = ''
   let kling_secret_key_base64 = false
@@ -1610,6 +1672,8 @@ function openEdit(row) {
       if (row.service_type === 'tts') {
         voice_id = s.voice_id || voice_id
         group_id = s.group_id || group_id
+        app_id = s.appid || s.app_id || ''
+        cluster = s.cluster || 'volcano_tts'
       }
       if (row.service_type === 'video' && row.api_protocol === 'kling_omni') {
         kling_access_key = s.kling_access_key || ''
@@ -1633,6 +1697,8 @@ function openEdit(row) {
     is_default: !!row.is_default,
     voice_id,
     group_id,
+    app_id,
+    cluster,
     kling_access_key,
     kling_secret_key,
     kling_secret_key_base64,
@@ -1657,6 +1723,8 @@ async function submit() {
       const s = {}
       if (form.value.voice_id) s.voice_id = form.value.voice_id
       if (form.value.group_id) s.group_id = form.value.group_id
+      if (form.value.app_id) s.appid = String(form.value.app_id).trim()
+      if (form.value.cluster) s.cluster = String(form.value.cluster).trim()
       settings = Object.keys(s).length ? JSON.stringify(s) : null
     } else if (form.value.service_type === 'video' && form.value.api_protocol === 'kling_omni') {
       let baseS = {}
