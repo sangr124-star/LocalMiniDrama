@@ -3,8 +3,8 @@
     <header class="header">
       <div class="header-inner">
         <h1 class="logo" @click="router.push('/')">
-          <span class="logo-main">本地短剧助手</span>
-          <span class="logo-sub">LocalMiniDrama</span>
+          <img src="/favicon.svg" alt="AI漫剧" class="logo-icon" />
+          <span class="logo-main">AI漫剧</span>
         </h1>
         <span class="breadcrumb-sep">›</span>
         <span class="page-title">{{ drama?.title || '剧集管理' }}</span>
