@@ -16,6 +16,13 @@ function createApp() {
   // 厂商锁定模式：在迁移完成后同步 vendor_lock 配置
   const { applyVendorLock } = require('./services/aiConfigService');
   applyVendorLock(db, logger, config);
+  // 用户体系：确保超级管理员 admin 存在
+  try {
+    const userService = require('./services/userService');
+    userService.ensureAdminUser(db, logger);
+  } catch (e) {
+    logger.errorw('ensureAdminUser failed', { error: e.message });
+  }
   const log = logger;
 
   const app = express();

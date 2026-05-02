@@ -501,6 +501,31 @@ function ensureAllColumns(database) {
       updated_at TEXT NOT NULL DEFAULT ''
     )`);
   } catch (_) {}
+
+  // --- users（用户体系，21_users.sql 兜底） ---
+  try {
+    database.exec(`CREATE TABLE IF NOT EXISTS users (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      username   TEXT NOT NULL UNIQUE,
+      password   TEXT NOT NULL DEFAULT '',
+      nickname   TEXT,
+      role       TEXT NOT NULL DEFAULT 'user',
+      status     TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT,
+      updated_at TEXT,
+      deleted_at TEXT
+    )`);
+  } catch (_) {}
+  ensureColumns(database, 'users', [
+    { name: 'username',   type: 'TEXT NOT NULL DEFAULT \'\'' },
+    { name: 'password',   type: 'TEXT NOT NULL DEFAULT \'\'' },
+    { name: 'nickname',   type: 'TEXT' },
+    { name: 'role',       type: 'TEXT NOT NULL DEFAULT \'user\'' },
+    { name: 'status',     type: 'TEXT NOT NULL DEFAULT \'active\'' },
+    { name: 'created_at', type: 'TEXT' },
+    { name: 'updated_at', type: 'TEXT' },
+    { name: 'deleted_at', type: 'TEXT' },
+  ]);
 }
 
 /** 对已打开的 database 执行迁移与兜底补列（供 app 启动时调用） */

@@ -4,8 +4,8 @@
     <header class="header">
       <div class="header-inner">
         <h1 class="logo" @click="goList">
-          <span class="logo-main">本地短剧助手</span>
-          <span class="logo-sub">LocalMiniDrama</span>
+          <img src="/favicon.svg" alt="AI漫剧" class="logo-icon" />
+          <span class="logo-main">AI漫剧</span>
         </h1>
         <span class="breadcrumb-sep">›</span>
         <span class="page-title">{{ dramaId ? (store.drama?.title || '项目') : '新建故事' }}</span>
@@ -18,7 +18,7 @@
             <el-icon><Sunny v-if="isDark" /><Moon v-else /></el-icon>
             {{ isDark ? '浅色' : '暗色' }}
           </el-button>
-          <el-button class="btn-ai-config" @click="showAiConfigDialog = true">
+          <el-button v-if="isSuperAdmin" class="btn-ai-config" @click="showAiConfigDialog = true">
             <el-icon><Setting /></el-icon>
             AI配置
           </el-button>
@@ -2162,6 +2162,9 @@ import { characterAPI } from '@/api/characters'
 import { propAPI } from '@/api/props'
 import { sceneAPI } from '@/api/scenes'
 import { taskAPI } from '@/api/task'
+import { getUser } from '@/utils/request'
+
+const isSuperAdmin = computed(() => getUser()?.role === 'super_admin')
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
 import { storyboardsAPI } from '@/api/storyboards'
@@ -6239,14 +6242,16 @@ html.light .header {
   margin: 0;
   cursor: pointer;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
   line-height: 1;
   transition: filter 0.3s;
 }
 .logo:hover { filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.5)); }
+.logo-icon { width: 26px; height: 26px; display: block; filter: drop-shadow(0 2px 6px rgba(124, 92, 255, 0.4)); }
 .logo-main {
-  font-size: 1.05rem;
+  font-size: 1.2rem;
   font-weight: 700;
   background: linear-gradient(135deg, #e0d4fc 0%, #a78bfa 50%, #818cf8 100%);
   -webkit-background-clip: text;

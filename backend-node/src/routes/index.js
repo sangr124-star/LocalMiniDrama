@@ -20,9 +20,33 @@ const assetRoutes = require('./assets');
 const audioRoutes = require('./audio');
 const promptOverridesRoutes = require('./promptOverrides');
 const sceneModelMapRoutes = require('./sceneModelMap');
+const authRoutes = require('./auth');
+const adminRoutes = require('./admin');
+const { buildAuthMiddleware } = require('../middleware/auth');
 
 function setupRouter(cfg, db, log) {
   const r = express.Router();
+  const auth = authRoutes(db, log);
+  const admin = adminRoutes(db, log);
+  const { authenticate, requireSuperAdmin } = buildAuthMiddleware(db);
+
+  // ---------- 认证（无需登录的端点） ----------
+  r.post('/auth/login', auth.login);
+
+  // ---------- 全局认证：以下所有路由都需要 token ----------
+  r.use(authenticate);
+
+  // ---------- 当前用户 / 修改密码 ----------
+  r.get('/auth/me', auth.me);
+  r.post('/auth/change-password', auth.changePassword);
+
+  // ---------- 用户管理（仅超级管理员） ----------
+  r.get('/admin/users', requireSuperAdmin, admin.listUsers);
+  r.post('/admin/users', requireSuperAdmin, admin.createUser);
+  r.put('/admin/users/:id', requireSuperAdmin, admin.updateUser);
+  r.post('/admin/users/:id/reset-password', requireSuperAdmin, admin.resetPassword);
+  r.delete('/admin/users/:id', requireSuperAdmin, admin.deleteUser);
+
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);
   const settings = settingsRoutes(db, cfg, log);
@@ -88,16 +112,18 @@ function setupRouter(cfg, db, log) {
   r.delete('/dramas/:id', drama.deleteDrama);
 
   // ---------- ai-configs ----------
-  r.get('/ai-configs', aiConfig.list);
-  r.post('/ai-configs', aiConfig.create);
-  r.post('/ai-configs/test', aiConfig.testConnection);
-  r.post('/ai-configs/jimeng2-list-assets', aiConfig.listJimeng2MaterialAssets);
-  r.post('/ai-configs/model-ark-asset', aiConfig.modelArkAsset);
+  // 读取（list / get / vendor-lock）：所有登录用户可访问，但非超级管理员看到的 api_key 已脱敏
+  // 写入（create / update / delete / test / bulk-update-key 等）：仅超级管理员
   r.get('/ai-configs/vendor-lock', aiConfig.vendorLock);  // 必须在 /:id 之前
-  r.put('/ai-configs/bulk-update-key', aiConfig.bulkUpdateKey);  // 必须在 /:id 之前
+  r.get('/ai-configs', aiConfig.list);
   r.get('/ai-configs/:id', aiConfig.get);
-  r.put('/ai-configs/:id', aiConfig.update);
-  r.delete('/ai-configs/:id', aiConfig.delete);
+  r.post('/ai-configs', requireSuperAdmin, aiConfig.create);
+  r.post('/ai-configs/test', requireSuperAdmin, aiConfig.testConnection);
+  r.post('/ai-configs/jimeng2-list-assets', requireSuperAdmin, aiConfig.listJimeng2MaterialAssets);
+  r.post('/ai-configs/model-ark-asset', requireSuperAdmin, aiConfig.modelArkAsset);
+  r.put('/ai-configs/bulk-update-key', requireSuperAdmin, aiConfig.bulkUpdateKey);  // 必须在 /:id 之前
+  r.put('/ai-configs/:id', requireSuperAdmin, aiConfig.update);
+  r.delete('/ai-configs/:id', requireSuperAdmin, aiConfig.delete);
 
   // ---------- generation (角色生成：AI + 入库 + 任务结果) ----------
   r.post('/generation/characters', (req, res) => {

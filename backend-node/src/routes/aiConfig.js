@@ -1,10 +1,28 @@
 const aiConfigService = require('../services/aiConfigService');
 const response = require('../response');
 
+/** 普通用户读到的配置：抹掉 api_key 与 settings 中的敏感字段 */
+function redactConfig(c) {
+  if (!c || typeof c !== 'object') return c;
+  const out = { ...c };
+  if (out.api_key) out.api_key = '****';
+  if (typeof out.settings === 'string' && out.settings) {
+    try {
+      const s = JSON.parse(out.settings);
+      // settings 里可能藏 kling_secret_key、appid+token 等敏感数据
+      const sensitiveKeys = ['kling_access_key', 'kling_secret_key', 'kling_secret_key_base64', 'appid', 'app_id', 'group_id'];
+      for (const k of sensitiveKeys) if (s[k]) s[k] = '****';
+      out.settings = JSON.stringify(s);
+    } catch (_) { /* 保持原样 */ }
+  }
+  return out;
+}
+
 function list(db) {
   return (req, res) => {
     const list = aiConfigService.listConfigs(db, req.query.service_type);
-    response.success(res, list);
+    const isSuperAdmin = req.user && req.user.role === 'super_admin';
+    response.success(res, isSuperAdmin ? list : list.map(redactConfig));
   };
 }
 
@@ -14,7 +32,8 @@ function get(db) {
     if (isNaN(id)) return response.badRequest(res, '无效的配置ID');
     const config = aiConfigService.getConfig(db, id);
     if (!config) return response.notFound(res, '配置不存在');
-    response.success(res, config);
+    const isSuperAdmin = req.user && req.user.role === 'super_admin';
+    response.success(res, isSuperAdmin ? config : redactConfig(config));
   };
 }
 

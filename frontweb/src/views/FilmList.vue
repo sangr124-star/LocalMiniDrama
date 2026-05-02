@@ -3,8 +3,8 @@
     <header class="header">
       <div class="header-inner">
         <h1 class="logo">
-          <span class="logo-main">本地短剧助手</span>
-          <span class="logo-sub">LocalMiniDrama</span>
+          <img src="/favicon.svg" alt="AI漫剧" class="logo-icon" />
+          <span class="logo-main">AI漫剧</span>
         </h1>
         <!-- 公共资源库（左侧，靛紫调） -->
         <div class="header-library">
@@ -27,15 +27,15 @@
           <el-button class="btn-library" title="媒体素材库" @click="$router.push('/media-library')">
             <el-icon><Files /></el-icon>素材库
           </el-button> -->
-          <el-button v-if="!vendorLockEnabled" class="btn-wechat" title="扫码联系作者" @click="showWechat = true">
-            <el-icon><ChatDotSquare /></el-icon>微信我
-          </el-button>
           <el-button class="btn-theme" :title="isDark ? '切换到浅色模式' : '切换到暗色模式'" @click="toggleTheme">
             <el-icon><Sunny v-if="isDark" /><Moon v-else /></el-icon>
             {{ isDark ? '浅色' : '暗色' }}
           </el-button>
-          <el-button class="btn-settings" @click="showAiConfigDialog = true">
+          <el-button v-if="isSuperAdmin" class="btn-settings" @click="showAiConfigDialog = true">
             <el-icon><Setting /></el-icon>AI配置
+          </el-button>
+          <el-button v-if="isSuperAdmin" class="btn-settings" title="用户管理" @click="$router.push('/admin/users')">
+            <el-icon><User /></el-icon>用户管理
           </el-button>
           <el-button class="btn-import" :loading="importing" @click="triggerImport">
             <el-icon><Upload /></el-icon>导入项目
@@ -43,6 +43,12 @@
           <input ref="importFileInput" type="file" accept=".zip" style="display:none" @change="onImportFile" />
           <el-button type="primary" class="btn-new" @click="goNewProject">
             <el-icon><Plus /></el-icon>新建项目
+          </el-button>
+          <el-button v-if="currentUser" class="btn-theme" :title="`点击修改密码 - ${currentUser.username}`" @click="onChangePassword">
+            <el-icon><User /></el-icon>{{ currentUser.nickname || currentUser.username }}
+          </el-button>
+          <el-button v-if="currentUser" class="btn-theme" title="退出登录" @click="onLogout">
+            <el-icon><SwitchButton /></el-icon>退出
           </el-button>
         </div>
       </div>
@@ -314,7 +320,7 @@
     </el-dialog>
 
     <!-- 微信二维码 -->
-    <el-dialog v-if="!vendorLockEnabled" v-model="showWechat" title="微信联系作者" width="320px" align-center>
+    <el-dialog v-if="false" v-model="showWechat" title="微信联系作者" width="320px" align-center>
       <div style="text-align:center;padding:8px 0 4px">
         <img src="/wx.jpg" alt="微信二维码" style="width:240px;height:240px;object-fit:contain;border-radius:8px;" />
         <p style="margin:12px 0 0;font-size:13px;color:var(--text-secondary,#a1a1aa);">扫码添加微信，欢迎交流</p>
@@ -353,10 +359,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete, Setting, Plus, User, PictureFilled, Box, Sunny, Moon, ChatDotSquare, Download, Upload, QuestionFilled, FolderOpened, MagicStick, Files } from '@element-plus/icons-vue'
+import { Edit, Delete, Setting, Plus, User, PictureFilled, Box, Sunny, Moon, ChatDotSquare, Download, Upload, QuestionFilled, FolderOpened, MagicStick, Files, SwitchButton } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
 import { dramaAPI } from '@/api/drama'
 import { characterLibraryAPI } from '@/api/characterLibrary'
@@ -367,6 +373,8 @@ import { uploadAPI } from '@/api/upload'
 import { aiAPI } from '@/api/ai'
 import { imagesAPI } from '@/api/images'
 import { taskAPI } from '@/api/task'
+import { authAPI } from '@/api/auth'
+import { getUser, clearAuth } from '@/utils/request'
 
 const router = useRouter()
 const { isDark, toggle: toggleTheme } = useTheme()
@@ -430,6 +438,34 @@ async function doGenerateLibImg(form, prompt, api, reloadFn) {
 const loading = ref(false)
 const dramas = ref([])
 const total = ref(0)
+const currentUser = ref(getUser())
+const isSuperAdmin = computed(() => currentUser.value?.role === 'super_admin')
+
+async function onLogout() {
+  clearAuth()
+  router.replace('/login')
+}
+
+async function onChangePassword() {
+  try {
+    const { value: oldPwd } = await ElMessageBox.prompt('请输入原密码', '修改密码', {
+      inputType: 'password',
+      confirmButtonText: '下一步',
+      cancelButtonText: '取消',
+    })
+    const { value: newPwd } = await ElMessageBox.prompt('请输入新密码（至少 6 位）', '修改密码', {
+      inputType: 'password',
+      confirmButtonText: '提交',
+      cancelButtonText: '取消',
+    })
+    if (!newPwd || newPwd.length < 6) {
+      ElMessage.warning('新密码至少 6 位')
+      return
+    }
+    await authAPI.changePassword(oldPwd, newPwd)
+    ElMessage.success('密码已更新')
+  } catch (_) { /* cancelled */ }
+}
 
 const showAiConfigDialog = ref(false)
 const showWechat = ref(false)
@@ -863,12 +899,19 @@ onMounted(async () => {
   margin: 0;
   cursor: pointer;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
   line-height: 1;
 }
+.logo-icon {
+  width: 28px;
+  height: 28px;
+  display: block;
+  filter: drop-shadow(0 2px 6px rgba(124, 92, 255, 0.4));
+}
 .logo-main {
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   font-weight: 700;
   letter-spacing: -0.01em;
   background: linear-gradient(135deg, #a5b4fc 0%, #c084fc 50%, #f0abfc 100%);
