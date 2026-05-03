@@ -38,7 +38,7 @@ const router = createRouter({
       path: '/admin/users',
       name: 'admin-users',
       component: () => import('@/views/UserManagement.vue'),
-      meta: { title: '用户管理', requireSuperAdmin: true }
+      meta: { title: '用户管理', requireAdminOrAbove: true }
     },
     {
       path: '/free-create',
@@ -69,6 +69,13 @@ router.beforeEach((to) => {
   if (to.meta.requireSuperAdmin) {
     const user = getUser()
     if (!user || user.role !== 'super_admin') {
+      return { path: '/' }
+    }
+  }
+  // 需要管理员或以上的页面
+  if (to.meta.requireAdminOrAbove) {
+    const user = getUser()
+    if (!user || !['admin', 'super_admin'].includes(user.role)) {
       return { path: '/' }
     }
   }

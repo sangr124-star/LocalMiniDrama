@@ -34,7 +34,7 @@
           <el-button v-if="isSuperAdmin" class="btn-settings" @click="showAiConfigDialog = true">
             <el-icon><Setting /></el-icon>AI配置
           </el-button>
-          <el-button v-if="isSuperAdmin" class="btn-settings" title="用户管理" @click="$router.push('/admin/users')">
+          <el-button v-if="isAdminOrAbove" class="btn-settings" title="用户管理" @click="$router.push('/admin/users')">
             <el-icon><User /></el-icon>用户管理
           </el-button>
           <el-button class="btn-import" :loading="importing" @click="triggerImport">
@@ -45,7 +45,7 @@
             <el-icon><Plus /></el-icon>新建项目
           </el-button>
           <el-button v-if="currentUser" class="btn-theme" :title="`点击修改密码 - ${currentUser.username}`" @click="onChangePassword">
-            <el-icon><User /></el-icon>{{ currentUser.role === 'super_admin' ? '超级管理员' : (currentUser.nickname || currentUser.username) }}
+            <el-icon><User /></el-icon>{{ roleLabel(currentUser) }}
           </el-button>
           <el-button v-if="currentUser" class="btn-theme" title="退出登录" @click="onLogout">
             <el-icon><SwitchButton /></el-icon>退出
@@ -56,6 +56,10 @@
 
     <main class="main">
       <div v-loading="loading" class="projects-wrap">
+        <!-- 超级管理员专属：查看全部用户内容开关 -->
+        <div v-if="isSuperAdmin" class="scope-toggle">
+          <el-switch v-model="showAllUsers" @change="loadList" active-text="显示所有用户的项目" inactive-text="仅显示我的" />
+        </div>
         <div class="project-grid">
           <!-- 操作卡片：始终作为第一个格子 -->
           <div class="project-card action-card">
@@ -110,6 +114,7 @@
                 <span v-if="d.metadata?.aspect_ratio" class="badge badge-ratio">{{ d.metadata.aspect_ratio }}</span>
                 <span v-if="d.style" class="badge badge-style">{{ formatStyle(d.style) }}</span>
                 <span v-if="d.genre" class="badge badge-genre">{{ formatGenre(d.genre) }}</span>
+                <span v-if="isSuperAdmin && showAllUsers && d.creator_username" class="badge badge-creator">创建人：{{ d.creator_username }}</span>
               </div>
               <p class="project-meta">{{ formatDate(d.updated_at) }}</p>
             </div>
@@ -440,6 +445,16 @@ const dramas = ref([])
 const total = ref(0)
 const currentUser = ref(getUser())
 const isSuperAdmin = computed(() => currentUser.value?.role === 'super_admin')
+const isAdminOrAbove = computed(() => ['admin', 'super_admin'].includes(currentUser.value?.role))
+// super_admin 专属：是否查看全部用户内容（默认仅自己）
+const showAllUsers = ref(false)
+
+function roleLabel(user) {
+  if (!user) return ''
+  if (user.role === 'super_admin') return '超级管理员'
+  if (user.role === 'admin') return '管理员'
+  return user.nickname || user.username || ''
+}
 
 async function onLogout() {
   clearAuth()
@@ -500,7 +515,9 @@ let charLibraryKeywordTimer = null
 async function loadCharLibraryList() {
   charLibraryLoading.value = true
   try {
-    const res = await characterLibraryAPI.list({ page: charLibraryPage.value, page_size: charLibraryPageSize.value, keyword: charLibraryKeyword.value || undefined, global: 1 })
+    const params = { page: charLibraryPage.value, page_size: charLibraryPageSize.value, keyword: charLibraryKeyword.value || undefined, global: 1 }
+    if (isSuperAdmin.value && showAllUsers.value) params.scope = 'all'
+    const res = await characterLibraryAPI.list(params)
     charLibraryList.value = res?.items ?? []
     const p = res?.pagination ?? {}
     charLibraryTotal.value = p.total ?? 0
@@ -547,7 +564,9 @@ let sceneLibraryKeywordTimer = null
 async function loadSceneLibraryList() {
   sceneLibraryLoading.value = true
   try {
-    const res = await sceneLibraryAPI.list({ page: sceneLibraryPage.value, page_size: sceneLibraryPageSize.value, keyword: sceneLibraryKeyword.value || undefined, global: 1 })
+    const params = { page: sceneLibraryPage.value, page_size: sceneLibraryPageSize.value, keyword: sceneLibraryKeyword.value || undefined, global: 1 }
+    if (isSuperAdmin.value && showAllUsers.value) params.scope = 'all'
+    const res = await sceneLibraryAPI.list(params)
     sceneLibraryList.value = res?.items ?? []
     const p = res?.pagination ?? {}
     sceneLibraryTotal.value = p.total ?? 0
@@ -595,7 +614,9 @@ let propLibraryKeywordTimer = null
 async function loadPropLibraryList() {
   propLibraryLoading.value = true
   try {
-    const res = await propLibraryAPI.list({ page: propLibraryPage.value, page_size: propLibraryPageSize.value, keyword: propLibraryKeyword.value || undefined, global: 1 })
+    const params = { page: propLibraryPage.value, page_size: propLibraryPageSize.value, keyword: propLibraryKeyword.value || undefined, global: 1 }
+    if (isSuperAdmin.value && showAllUsers.value) params.scope = 'all'
+    const res = await propLibraryAPI.list(params)
     propLibraryList.value = res?.items ?? []
     const p = res?.pagination ?? {}
     propLibraryTotal.value = p.total ?? 0
@@ -662,8 +683,10 @@ const editSaving = ref(false)
 
 function loadList() {
   loading.value = true
+  const params = { page: 1, page_size: 50 }
+  if (isSuperAdmin.value && showAllUsers.value) params.scope = 'all'
   dramaAPI
-    .list({ page: 1, page_size: 50 })
+    .list(params)
     .then((res) => {
       dramas.value = res?.items ?? []
       total.value = res?.pagination?.total ?? 0
@@ -1258,6 +1281,16 @@ html.light .btn-import {
   background: rgba(249, 115, 22, 0.1);
   color: #fb923c;
   border: 1px solid rgba(249, 115, 22, 0.25);
+}
+.badge-creator {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+.scope-toggle {
+  margin: 0 0 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 .project-meta {
   font-size: 0.75rem;

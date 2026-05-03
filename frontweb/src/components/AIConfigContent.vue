@@ -106,17 +106,17 @@
           </el-table>
         </div>
       </el-tab-pane>
-      <el-tab-pane v-if="!hidePrompts" label="高级设置（提示词）" name="prompts">
+      <el-tab-pane v-if="isSuperAdmin" label="高级设置（提示词）" name="prompts">
         <div class="tab-content">
           <PromptEditor />
         </div>
       </el-tab-pane>
-      <el-tab-pane label="高级设置（业务场景）" name="sceneModelMap">
+      <el-tab-pane v-if="isSuperAdmin" label="高级设置（业务场景）" name="sceneModelMap">
         <div class="tab-content">
           <SceneModelMap />
         </div>
       </el-tab-pane>
-      <el-tab-pane label="生成设置" name="generation">
+      <el-tab-pane v-if="isSuperAdmin" label="生成设置" name="generation">
         <div class="tab-content generation-settings">
           <div class="gs-section-title">⚡ 一键生成并发设置</div>
           <p class="gs-desc">控制「一键生成视频」和「补全并生成」流水线中，各类任务同时并行生成的数量。并发数越高速度越快，但过高可能触发 API 限流（429 错误）。建议根据你的 API 额度选择。</p>
@@ -1068,7 +1068,7 @@ import SceneModelMap from '@/components/SceneModelMap.vue'
 import Sd2AssetManagement from '@/components/Sd2AssetManagement.vue'
 import { getUser } from '@/utils/request'
 
-const hidePrompts = computed(() => !!getUser()?.hide_prompts)
+const isSuperAdmin = computed(() => getUser()?.role === 'super_admin')
 const activeTab = ref('configs')
 const importFileRef = ref(null)
 

@@ -14,9 +14,7 @@
       <el-table-column prop="nickname" label="昵称" width="160" />
       <el-table-column label="角色" width="120">
         <template #default="{ row }">
-          <el-tag :type="row.role === 'super_admin' ? 'danger' : 'info'">
-            {{ row.role === 'super_admin' ? '超级管理员' : '普通用户' }}
-          </el-tag>
+          <el-tag :type="roleTagType(row.role)">{{ roleLabel(row.role) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="100">
@@ -29,12 +27,15 @@
       <el-table-column prop="created_at" label="创建时间" width="200" />
       <el-table-column label="操作" min-width="280">
         <template #default="{ row }">
-          <el-button size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button size="small" @click="openReset(row)">重置密码</el-button>
-          <el-button v-if="row.username !== 'admin'" size="small" type="warning" @click="toggleStatus(row)">
-            {{ row.status === 'active' ? '禁用' : '启用' }}
-          </el-button>
-          <el-button v-if="row.username !== 'admin' && row.id !== currentUserId" size="small" type="danger" @click="onDelete(row)">删除</el-button>
+          <template v-if="canActOn(row)">
+            <el-button size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button size="small" @click="openReset(row)">重置密码</el-button>
+            <el-button v-if="row.username !== 'admin'" size="small" type="warning" @click="toggleStatus(row)">
+              {{ row.status === 'active' ? '禁用' : '启用' }}
+            </el-button>
+            <el-button v-if="row.username !== 'admin' && row.id !== currentUserId" size="small" type="danger" @click="onDelete(row)">删除</el-button>
+          </template>
+          <span v-else class="readonly-hint">（无权操作）</span>
         </template>
       </el-table-column>
     </el-table>
@@ -52,10 +53,12 @@
           <el-input v-model="form.password" type="password" placeholder="至少 6 位" show-password />
         </el-form-item>
         <el-form-item label="角色" prop="role">
-          <el-select v-model="form.role" :disabled="form.username === 'admin'" style="width: 100%">
+          <el-select v-model="form.role" :disabled="form.username === 'admin' || !isSuperAdmin" style="width: 100%">
             <el-option label="普通用户" value="user" />
-            <el-option label="超级管理员" value="super_admin" />
+            <el-option v-if="isSuperAdmin" label="管理员" value="admin" />
+            <el-option v-if="isSuperAdmin" label="超级管理员" value="super_admin" />
           </el-select>
+          <p v-if="!isSuperAdmin" style="margin: 4px 0 0; font-size: 12px; color: #71717a;">仅超级管理员可创建管理员/超级管理员</p>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -83,7 +86,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminAPI } from '@/api/auth'
@@ -97,7 +100,25 @@ const formVisible = ref(false)
 const resetVisible = ref(false)
 const formRef = ref(null)
 const editingId = ref(null)
-const currentUserId = getUser()?.id
+const currentUser = getUser()
+const currentUserId = currentUser?.id
+const isSuperAdmin = computed(() => currentUser?.role === 'super_admin')
+
+function roleLabel(role) {
+  if (role === 'super_admin') return '超级管理员'
+  if (role === 'admin') return '管理员'
+  return '普通用户'
+}
+function roleTagType(role) {
+  if (role === 'super_admin') return 'danger'
+  if (role === 'admin') return 'warning'
+  return 'info'
+}
+// admin 只能操作普通 user；super_admin 不限
+function canActOn(row) {
+  if (isSuperAdmin.value) return true
+  return row.role === 'user'
+}
 
 const form = ref({ username: '', nickname: '', password: '', role: 'user' })
 const resetForm = ref({ id: null, username: '', new_password: '' })
