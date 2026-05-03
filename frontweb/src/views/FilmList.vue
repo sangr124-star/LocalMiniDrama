@@ -45,7 +45,7 @@
             <el-icon><Plus /></el-icon>新建项目
           </el-button>
           <el-button v-if="currentUser" class="btn-theme" :title="`点击修改密码 - ${currentUser.username}`" @click="onChangePassword">
-            <el-icon><User /></el-icon>{{ currentUser.nickname || currentUser.username }}
+            <el-icon><User /></el-icon>{{ currentUser.role === 'super_admin' ? '超级管理员' : (currentUser.nickname || currentUser.username) }}
           </el-button>
           <el-button v-if="currentUser" class="btn-theme" title="退出登录" @click="onLogout">
             <el-icon><SwitchButton /></el-icon>退出
