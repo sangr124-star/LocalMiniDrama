@@ -452,7 +452,6 @@ const showAllUsers = ref(false)
 function roleLabel(user) {
   if (!user) return ''
   if (user.role === 'super_admin') return '超级管理员'
-  if (user.role === 'admin') return '管理员'
   return user.nickname || user.username || ''
 }
 
