@@ -33,13 +33,7 @@ function buildAuthMiddleware(db) {
     next();
   }
 
-  function requireSuperAdmin(req, res, next) {
-    if (!req.user) return res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: '未登录' } });
-    if (req.user.role !== 'super_admin') return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: '需要超级管理员权限' } });
-    next();
-  }
-
-  return { authenticate, requireSuperAdmin };
+  return { authenticate };
 }
 
 module.exports = { buildAuthMiddleware, signToken, JWT_SECRET, JWT_EXPIRES_IN };

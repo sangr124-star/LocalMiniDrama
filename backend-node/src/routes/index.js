@@ -23,20 +23,15 @@ const sceneModelMapRoutes = require('./sceneModelMap');
 const authRoutes = require('./auth');
 const adminRoutes = require('./admin');
 const { buildAuthMiddleware } = require('../middleware/auth');
-const { isPromptHidden } = require('../constants/featureGates');
-
-function denyIfPromptHidden(req, res, next) {
-  if (isPromptHidden(req.user)) {
-    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: '该功能未开放' } });
-  }
-  next();
-}
+const { requireSuperAdmin, requireAdminOrAbove } = require('../middleware/permissions');
+const { buildOwnershipMiddleware } = require('../middleware/ownership');
 
 function setupRouter(cfg, db, log) {
   const r = express.Router();
   const auth = authRoutes(db, log);
   const admin = adminRoutes(db, log);
-  const { authenticate, requireSuperAdmin } = buildAuthMiddleware(db);
+  const { authenticate } = buildAuthMiddleware(db);
+  const requireOwnership = buildOwnershipMiddleware(db);
 
   // ---------- 认证（无需登录的端点） ----------
   r.post('/auth/login', auth.login);
@@ -48,12 +43,12 @@ function setupRouter(cfg, db, log) {
   r.get('/auth/me', auth.me);
   r.post('/auth/change-password', auth.changePassword);
 
-  // ---------- 用户管理（仅超级管理员） ----------
-  r.get('/admin/users', requireSuperAdmin, admin.listUsers);
-  r.post('/admin/users', requireSuperAdmin, admin.createUser);
-  r.put('/admin/users/:id', requireSuperAdmin, admin.updateUser);
-  r.post('/admin/users/:id/reset-password', requireSuperAdmin, admin.resetPassword);
-  r.delete('/admin/users/:id', requireSuperAdmin, admin.deleteUser);
+  // ---------- 用户管理（admin + super_admin 都可访问；细粒度由 service 层控制） ----------
+  r.get('/admin/users', requireAdminOrAbove, admin.listUsers);
+  r.post('/admin/users', requireAdminOrAbove, admin.createUser);
+  r.put('/admin/users/:id', requireAdminOrAbove, admin.updateUser);
+  r.post('/admin/users/:id/reset-password', requireAdminOrAbove, admin.resetPassword);
+  r.delete('/admin/users/:id', requireAdminOrAbove, admin.deleteUser);
 
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);
@@ -82,8 +77,7 @@ function setupRouter(cfg, db, log) {
   r.get('/dramas', drama.listDramas);
   r.post('/dramas', drama.createDrama);
   r.get('/dramas/stats', drama.getDramaStats);
-  // 导出/导入（放在 :id 路由前，避免被 :id 捕获）
-  r.get('/dramas/:id/export', drama.exportDrama);
+  // 导入（放在 :id 路由前，避免被 :id 捕获）
   const multer = require('multer');
   const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
   r.post('/dramas/import', importUpload.single('file'), drama.importDrama);
@@ -109,15 +103,16 @@ function setupRouter(cfg, db, log) {
   });
   r.get('/dramas/examples', drama.listExamples);
   r.post('/dramas/import-example', drama.importExample);
-  r.put('/dramas/:id/outline', drama.saveOutline);
-  r.get('/dramas/:id/characters', drama.getCharacters);
-  r.put('/dramas/:id/characters', drama.saveCharacters);
-  r.put('/dramas/:id/episodes', drama.saveEpisodes);
-  r.put('/dramas/:id/progress', drama.saveProgress);
-  r.get('/dramas/:id/props', drama.listProps);
-  r.get('/dramas/:id', drama.getDrama);
-  r.put('/dramas/:id', drama.updateDrama);
-  r.delete('/dramas/:id', drama.deleteDrama);
+  r.get('/dramas/:id/export', requireOwnership('drama'), drama.exportDrama);
+  r.put('/dramas/:id/outline', requireOwnership('drama'), drama.saveOutline);
+  r.get('/dramas/:id/characters', requireOwnership('drama'), drama.getCharacters);
+  r.put('/dramas/:id/characters', requireOwnership('drama'), drama.saveCharacters);
+  r.put('/dramas/:id/episodes', requireOwnership('drama'), drama.saveEpisodes);
+  r.put('/dramas/:id/progress', requireOwnership('drama'), drama.saveProgress);
+  r.get('/dramas/:id/props', requireOwnership('drama'), drama.listProps);
+  r.get('/dramas/:id', requireOwnership('drama'), drama.getDrama);
+  r.put('/dramas/:id', requireOwnership('drama'), drama.updateDrama);
+  r.delete('/dramas/:id', requireOwnership('drama'), drama.deleteDrama);
 
   // ---------- ai-configs ----------
   // 读取（list / get / vendor-lock）：所有登录用户可访问，但非超级管理员看到的 api_key 已脱敏
@@ -168,52 +163,52 @@ function setupRouter(cfg, db, log) {
   // ---------- character-library ----------
   r.get('/character-library', charLibrary.list);
   r.post('/character-library', charLibrary.create);
-  r.get('/character-library/:id', charLibrary.get);
-  r.put('/character-library/:id', charLibrary.update);
-  r.delete('/character-library/:id', charLibrary.delete);
+  r.get('/character-library/:id', requireOwnership('character_library'), charLibrary.get);
+  r.put('/character-library/:id', requireOwnership('character_library'), charLibrary.update);
+  r.delete('/character-library/:id', requireOwnership('character_library'), charLibrary.delete);
 
   // ---------- scene-library ----------
   r.get('/scene-library', sceneLibrary.list);
   r.post('/scene-library', sceneLibrary.create);
-  r.get('/scene-library/:id', sceneLibrary.get);
-  r.put('/scene-library/:id', sceneLibrary.update);
-  r.delete('/scene-library/:id', sceneLibrary.delete);
+  r.get('/scene-library/:id', requireOwnership('scene_library'), sceneLibrary.get);
+  r.put('/scene-library/:id', requireOwnership('scene_library'), sceneLibrary.update);
+  r.delete('/scene-library/:id', requireOwnership('scene_library'), sceneLibrary.delete);
 
   // ---------- prop-library ----------
   r.get('/prop-library', propLibrary.list);
   r.post('/prop-library', propLibrary.create);
-  r.get('/prop-library/:id', propLibrary.get);
-  r.put('/prop-library/:id', propLibrary.update);
-  r.delete('/prop-library/:id', propLibrary.delete);
+  r.get('/prop-library/:id', requireOwnership('prop_library'), propLibrary.get);
+  r.put('/prop-library/:id', requireOwnership('prop_library'), propLibrary.update);
+  r.delete('/prop-library/:id', requireOwnership('prop_library'), propLibrary.delete);
 
   // ---------- characters ----------
-  r.get('/characters/:id', characters.getOne);
-  r.put('/characters/:id', characters.update);
-  r.delete('/characters/:id', characters.delete);
-  r.post('/characters/batch-generate-images', characters.batchGenerateImages);
-  r.post('/characters/:id/generate-image', characters.generateImage);
-  r.post('/characters/:id/generate-four-view-image', characters.generateFourViewImage);
-  r.post('/characters/:id/generate-prompt', characters.generatePrompt);
-  r.post('/characters/:id/upload-image', uploadModule.multerSingle, characters.uploadImage);
-  r.put('/characters/:id/image', characters.putImage);
-  r.put('/characters/:id/image-from-library', characters.imageFromLibrary);
-  r.post('/characters/:id/add-to-library', characters.addToLibrary);
-  r.post('/characters/:id/add-to-material-library', characters.addToMaterialLibrary);
-  r.post('/characters/:id/sd2-certify', characters.sd2Certify);
-  r.post('/characters/:id/sd2-certify/refresh', characters.sd2CertifyRefresh);
-  r.post('/characters/:id/extract-from-image', characters.extractFromImage);
-  r.post('/characters/:id/extract-anchors', characters.extractAnchors);
+  r.post('/characters/batch-generate-images', characters.batchGenerateImages);  // 必须在 :id 之前
+  r.get('/characters/:id', requireOwnership('character'), characters.getOne);
+  r.put('/characters/:id', requireOwnership('character'), characters.update);
+  r.delete('/characters/:id', requireOwnership('character'), characters.delete);
+  r.post('/characters/:id/generate-image', requireOwnership('character'), characters.generateImage);
+  r.post('/characters/:id/generate-four-view-image', requireOwnership('character'), characters.generateFourViewImage);
+  r.post('/characters/:id/generate-prompt', requireOwnership('character'), characters.generatePrompt);
+  r.post('/characters/:id/upload-image', requireOwnership('character'), uploadModule.multerSingle, characters.uploadImage);
+  r.put('/characters/:id/image', requireOwnership('character'), characters.putImage);
+  r.put('/characters/:id/image-from-library', requireOwnership('character'), characters.imageFromLibrary);
+  r.post('/characters/:id/add-to-library', requireOwnership('character'), characters.addToLibrary);
+  r.post('/characters/:id/add-to-material-library', requireOwnership('character'), characters.addToMaterialLibrary);
+  r.post('/characters/:id/sd2-certify', requireOwnership('character'), characters.sd2Certify);
+  r.post('/characters/:id/sd2-certify/refresh', requireOwnership('character'), characters.sd2CertifyRefresh);
+  r.post('/characters/:id/extract-from-image', requireOwnership('character'), characters.extractFromImage);
+  r.post('/characters/:id/extract-anchors', requireOwnership('character'), characters.extractAnchors);
 
   // ---------- props ----------
-  r.get('/props/:id', prop.getPropById);
-  r.post('/props', prop.createProp);
-  r.put('/props/:id', prop.updateProp);
-  r.delete('/props/:id', prop.deleteProp);
-  r.post('/props/:id/generate', prop.generateImage);
-  r.post('/props/:id/generate-prompt', prop.generatePropPrompt);
-  r.post('/props/:id/add-to-library', prop.addToLibrary);
-  r.post('/props/:id/add-to-material-library', prop.addToMaterialLibrary);
-  r.post('/props/:id/extract-from-image', prop.extractPropFromImage);
+  r.post('/props', prop.createProp);  // 创建走 drama_id（在 body 里），不挂 ownership
+  r.get('/props/:id', requireOwnership('prop'), prop.getPropById);
+  r.put('/props/:id', requireOwnership('prop'), prop.updateProp);
+  r.delete('/props/:id', requireOwnership('prop'), prop.deleteProp);
+  r.post('/props/:id/generate', requireOwnership('prop'), prop.generateImage);
+  r.post('/props/:id/generate-prompt', requireOwnership('prop'), prop.generatePropPrompt);
+  r.post('/props/:id/add-to-library', requireOwnership('prop'), prop.addToLibrary);
+  r.post('/props/:id/add-to-material-library', requireOwnership('prop'), prop.addToMaterialLibrary);
+  r.post('/props/:id/extract-from-image', requireOwnership('prop'), prop.extractPropFromImage);
 
   // ---------- vision: 从图片提取描述（不依赖已有实体 ID）----------
   r.post('/extract-description-from-image', async (req, res) => {
@@ -235,83 +230,83 @@ function setupRouter(cfg, db, log) {
   r.post('/upload/image', uploadModule.multerSingle, uploadHandlers.uploadImage);
 
   // ---------- episodes ----------
-  // 注意：drama.generateStoryboard 已处理所有逻辑（包括参数解析），这里统一使用 drama 模块的实现
-  // 之前可能有部分路由指向了 storyboards.episodeStoryboardsGenerate，这可能导致参数解析不一致
-  r.post('/episodes/:episode_id/storyboards', drama.generateStoryboard);
-  r.post('/episodes/:episode_id/props/extract', prop.extractProps);
-  r.post('/episodes/:episode_id/characters/extract', stub.episodeCharactersExtract);
-  r.get('/episodes/:episode_id/storyboards', storyboards.episodeStoryboardsGet);
-  r.post('/episodes/:episode_id/finalize', drama.finalizeEpisode);
-  r.get('/episodes/:episode_id/download', drama.downloadEpisodeVideo);
+  r.post('/episodes/:episode_id/storyboards', requireOwnership('episode'), drama.generateStoryboard);
+  r.post('/episodes/:episode_id/props/extract', requireOwnership('episode'), prop.extractProps);
+  r.post('/episodes/:episode_id/characters/extract', requireOwnership('episode'), stub.episodeCharactersExtract);
+  r.get('/episodes/:episode_id/storyboards', requireOwnership('episode'), storyboards.episodeStoryboardsGet);
+  r.post('/episodes/:episode_id/finalize', requireOwnership('episode'), drama.finalizeEpisode);
+  r.get('/episodes/:episode_id/download', requireOwnership('episode'), drama.downloadEpisodeVideo);
 
   // ---------- tasks ----------
+  // 任务通过 resource_id 关联到 dramas/episodes 等，前端按需查询；这里不做强制 ownership
+  // （任务列表的过滤由 service 层根据传入的 resource id 反查时校验）
   r.get('/tasks/:task_id', task.getTaskStatus);
   r.get('/tasks', task.getResourceTasks);
 
   // ---------- scenes ----------
-  r.get('/scenes/:scene_id', scenes.getOne);
-  r.post('/scenes/:scene_id/generate-prompt', scenes.generatePrompt);
-  r.put('/scenes/:scene_id', scenes.update);
-  r.put('/scenes/:scene_id/prompt', scenes.updatePrompt);
-  r.delete('/scenes/:scene_id', scenes.delete);
-  r.post('/scenes/generate-image', scenes.generateImage);
-  r.post('/scenes', scenes.create);
-  r.post('/scenes/:scene_id/generate-four-view-image', scenes.generateFourViewImage);
-  r.post('/scenes/:scene_id/add-to-library', scenes.addToLibrary);
-  r.post('/scenes/:scene_id/add-to-material-library', scenes.addToMaterialLibrary);
-  r.post('/scenes/:scene_id/extract-from-image', scenes.extractFromImage);
+  r.post('/scenes', scenes.create);  // body 里带 drama_id
+  r.post('/scenes/generate-image', scenes.generateImage);  // 不依赖 :scene_id，由 body 决定
+  r.get('/scenes/:scene_id', requireOwnership('scene'), scenes.getOne);
+  r.post('/scenes/:scene_id/generate-prompt', requireOwnership('scene'), scenes.generatePrompt);
+  r.put('/scenes/:scene_id', requireOwnership('scene'), scenes.update);
+  r.put('/scenes/:scene_id/prompt', requireOwnership('scene'), scenes.updatePrompt);
+  r.delete('/scenes/:scene_id', requireOwnership('scene'), scenes.delete);
+  r.post('/scenes/:scene_id/generate-four-view-image', requireOwnership('scene'), scenes.generateFourViewImage);
+  r.post('/scenes/:scene_id/add-to-library', requireOwnership('scene'), scenes.addToLibrary);
+  r.post('/scenes/:scene_id/add-to-material-library', requireOwnership('scene'), scenes.addToMaterialLibrary);
+  r.post('/scenes/:scene_id/extract-from-image', requireOwnership('scene'), scenes.extractFromImage);
 
   // ---------- images ----------
-  r.get('/images', images.list);
+  r.get('/images', images.list);  // list 按 user_id 过滤（service 层）
   r.post('/images', images.create);
-  r.get('/images/episode/:episode_id/backgrounds', images.episodeBackgrounds);
-  r.post('/images/episode/:episode_id/backgrounds/extract', images.episodeBackgroundsExtract);
-  r.post('/images/episode/:episode_id/batch', images.episodeBatch);
-  r.post('/images/scene/:scene_id', images.scene);
   r.post('/images/upload', images.upload);
-  r.get('/images/:id', images.get);
-  r.delete('/images/:id', images.delete);
+  r.get('/images/episode/:episode_id/backgrounds', requireOwnership('episode'), images.episodeBackgrounds);
+  r.post('/images/episode/:episode_id/backgrounds/extract', requireOwnership('episode'), images.episodeBackgroundsExtract);
+  r.post('/images/episode/:episode_id/batch', requireOwnership('episode'), images.episodeBatch);
+  r.post('/images/scene/:scene_id', requireOwnership('scene'), images.scene);
+  r.get('/images/:id', requireOwnership('image_generation'), images.get);
+  r.delete('/images/:id', requireOwnership('image_generation'), images.delete);
 
   // ---------- videos ----------
   r.get('/videos', videos.list);
   r.post('/videos', videos.create);
-  r.post('/videos/image/:image_gen_id', videos.fromImage);
-  r.post('/videos/episode/:episode_id/batch', videos.episodeBatch);
-  r.get('/videos/:id', videos.get);
-  r.delete('/videos/:id', videos.delete);
+  r.post('/videos/image/:image_gen_id', requireOwnership('image_generation'), videos.fromImage);
+  r.post('/videos/episode/:episode_id/batch', requireOwnership('episode'), videos.episodeBatch);
+  r.get('/videos/:id', requireOwnership('video_generation'), videos.get);
+  r.delete('/videos/:id', requireOwnership('video_generation'), videos.delete);
 
   // ---------- video-merges ----------
   r.get('/video-merges', videoMerges.list);
   r.post('/video-merges', videoMerges.create);
-  r.get('/video-merges/:merge_id', videoMerges.get);
-  r.delete('/video-merges/:merge_id', videoMerges.delete);
+  r.get('/video-merges/:merge_id', requireOwnership('video_merge'), videoMerges.get);
+  r.delete('/video-merges/:merge_id', requireOwnership('video_merge'), videoMerges.delete);
 
   // ---------- assets ----------
   r.get('/assets', assets.list);
   r.post('/assets', assets.create);
-  r.post('/assets/import/image/:image_gen_id', assets.importImage);
-  r.post('/assets/import/video/:video_gen_id', assets.importVideo);
-  r.get('/assets/:id', assets.get);
-  r.put('/assets/:id', assets.update);
-  r.delete('/assets/:id', assets.delete);
+  r.post('/assets/import/image/:image_gen_id', requireOwnership('image_generation'), assets.importImage);
+  r.post('/assets/import/video/:video_gen_id', requireOwnership('video_generation'), assets.importVideo);
+  r.get('/assets/:id', requireOwnership('asset'), assets.get);
+  r.put('/assets/:id', requireOwnership('asset'), assets.update);
+  r.delete('/assets/:id', requireOwnership('asset'), assets.delete);
 
   // ---------- storyboards ----------
-  r.get('/storyboards/episode/:episode_id/generate', storyboards.episodeStoryboardsGenerate);
-  r.post('/storyboards', storyboards.create);
-  r.post('/storyboards/:id/insert-before', storyboards.insertBefore);
-  r.get('/storyboards/:id', storyboards.getOne);
-  r.put('/storyboards/:id', storyboards.update);
-  r.delete('/storyboards/:id', storyboards.delete);
-  r.post('/storyboards/:id/props', prop.associateProps);
-  r.post('/storyboards/:id/frame-prompt', storyboards.framePrompt);
-  r.get('/storyboards/:id/frame-prompts', storyboards.framePromptsGet);
-  r.post('/storyboards/:id/polish-prompt', storyboards.polishPrompt);
-  r.post('/storyboards/:id/universal-segment-polish-stream', storyboards.polishUniversalSegmentStream);
-  r.post('/storyboards/:id/classic-video-prompt-polish-stream', storyboards.polishClassicVideoPromptStream);
-  r.post('/storyboards/:id/universal-segment-prompt-stream', storyboards.generateUniversalSegmentStream);
-  r.post('/storyboards/:id/universal-segment-prompt', storyboards.generateUniversalSegmentPrompt);
+  r.post('/storyboards', storyboards.create);  // body 里带 episode_id
   r.post('/storyboards/batch-infer-params', storyboards.batchInferParams);
-  r.post('/storyboards/:id/upscale', storyboards.upscale);
+  r.get('/storyboards/episode/:episode_id/generate', requireOwnership('episode'), storyboards.episodeStoryboardsGenerate);
+  r.post('/storyboards/:id/insert-before', requireOwnership('storyboard'), storyboards.insertBefore);
+  r.get('/storyboards/:id', requireOwnership('storyboard'), storyboards.getOne);
+  r.put('/storyboards/:id', requireOwnership('storyboard'), storyboards.update);
+  r.delete('/storyboards/:id', requireOwnership('storyboard'), storyboards.delete);
+  r.post('/storyboards/:id/props', requireOwnership('storyboard'), prop.associateProps);
+  r.post('/storyboards/:id/frame-prompt', requireOwnership('storyboard'), storyboards.framePrompt);
+  r.get('/storyboards/:id/frame-prompts', requireOwnership('storyboard'), storyboards.framePromptsGet);
+  r.post('/storyboards/:id/polish-prompt', requireOwnership('storyboard'), storyboards.polishPrompt);
+  r.post('/storyboards/:id/universal-segment-polish-stream', requireOwnership('storyboard'), storyboards.polishUniversalSegmentStream);
+  r.post('/storyboards/:id/classic-video-prompt-polish-stream', requireOwnership('storyboard'), storyboards.polishClassicVideoPromptStream);
+  r.post('/storyboards/:id/universal-segment-prompt-stream', requireOwnership('storyboard'), storyboards.generateUniversalSegmentStream);
+  r.post('/storyboards/:id/universal-segment-prompt', requireOwnership('storyboard'), storyboards.generateUniversalSegmentPrompt);
+  r.post('/storyboards/:id/upscale', requireOwnership('storyboard'), storyboards.upscale);
 
   // ---------- audio ----------
   r.post('/audio/extract', audio.extract);
@@ -321,19 +316,19 @@ function setupRouter(cfg, db, log) {
   r.get('/settings/language', settings.getLanguage);
   r.put('/settings/language', settings.updateLanguage);
   r.get('/settings/generation', settings.getGenerationSettings);
-  r.put('/settings/generation', settings.updateGenerationSettings);
+  r.put('/settings/generation', requireSuperAdmin, settings.updateGenerationSettings);
 
-  // ---------- prompt overrides ----------
-  r.get('/settings/prompts', denyIfPromptHidden, promptOverrides.list);
-  r.put('/settings/prompts/:key', denyIfPromptHidden, promptOverrides.update);
-  r.delete('/settings/prompts/:key', denyIfPromptHidden, promptOverrides.reset);
+  // ---------- prompt overrides（仅超级管理员）----------
+  r.get('/settings/prompts', requireSuperAdmin, promptOverrides.list);
+  r.put('/settings/prompts/:key', requireSuperAdmin, promptOverrides.update);
+  r.delete('/settings/prompts/:key', requireSuperAdmin, promptOverrides.reset);
 
-  // ---------- scene model map ----------
+  // ---------- scene model map（仅超级管理员）----------
   r.get('/scene-model-map', sceneModelMap.list);
-  r.post('/scene-model-map', sceneModelMap.create);
+  r.post('/scene-model-map', requireSuperAdmin, sceneModelMap.create);
   r.get('/scene-model-map/:key', sceneModelMap.get);
-  r.put('/scene-model-map/:key', sceneModelMap.update);
-  r.delete('/scene-model-map/:key', sceneModelMap.delete);
+  r.put('/scene-model-map/:key', requireSuperAdmin, sceneModelMap.update);
+  r.delete('/scene-model-map/:key', requireSuperAdmin, sceneModelMap.delete);
 
   // 启动时将已有的覆盖加载到 promptI18n 内存缓存
   try {
