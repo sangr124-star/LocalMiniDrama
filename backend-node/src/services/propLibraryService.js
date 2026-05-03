@@ -18,45 +18,50 @@ function rowToItem(r) {
   };
 }
 
-function listLibraryItems(db, query) {
-  let sql = 'FROM prop_libraries WHERE deleted_at IS NULL';
+function listLibraryItems(db, query, userScope) {
+  let sql = 'FROM prop_libraries pl LEFT JOIN users u ON u.id = pl.user_id WHERE pl.deleted_at IS NULL';
   const params = [];
   if (query.global === '1' || query.global === 1) {
-    sql += ' AND drama_id IS NULL';
+    sql += ' AND pl.drama_id IS NULL';
   } else if (query.drama_id != null && query.drama_id !== '') {
-    sql += ' AND drama_id = ?';
+    sql += ' AND pl.drama_id = ?';
     params.push(Number(query.drama_id));
   }
   if (query.category) {
-    sql += ' AND category = ?';
+    sql += ' AND pl.category = ?';
     params.push(query.category);
   }
   if (query.source_type) {
-    sql += ' AND source_type = ?';
+    sql += ' AND pl.source_type = ?';
     params.push(query.source_type);
   }
   if (query.keyword) {
-    sql += ' AND (name LIKE ? OR description LIKE ? OR prompt LIKE ?)';
+    sql += ' AND (pl.name LIKE ? OR pl.description LIKE ? OR pl.prompt LIKE ?)';
     const k = '%' + query.keyword + '%';
     params.push(k, k, k);
+  }
+  if (userScope && !userScope.isGlobal) {
+    sql += ' AND pl.user_id = ?';
+    params.push(userScope.userId);
   }
   const countRow = db.prepare('SELECT COUNT(*) as total ' + sql).get(...params);
   const total = countRow.total || 0;
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 20));
   const offset = (page - 1) * pageSize;
-  const rows = db.prepare('SELECT * ' + sql + ' ORDER BY created_at DESC LIMIT ? OFFSET ?').all(...params, pageSize, offset);
-  return { items: rows.map(rowToItem), total, page, pageSize };
+  const rows = db.prepare('SELECT pl.*, u.username AS creator_username ' + sql + ' ORDER BY pl.created_at DESC LIMIT ? OFFSET ?').all(...params, pageSize, offset);
+  return { items: rows.map((r) => ({ ...rowToItem(r), creator_username: r.creator_username || null })), total, page, pageSize };
 }
 
-function createLibraryItem(db, log, req) {
+function createLibraryItem(db, log, req, userId) {
   const now = new Date().toISOString();
   const sourceType = req.source_type || 'generated';
   const info = db.prepare(
-    `INSERT INTO prop_libraries (drama_id, name, description, prompt, image_url, local_path, category, tags, source_type, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO prop_libraries (drama_id, user_id, name, description, prompt, image_url, local_path, category, tags, source_type, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     req.drama_id ?? null,
+    userId || null,
     req.name || '',
     req.description ?? null,
     req.prompt ?? null,
@@ -68,7 +73,7 @@ function createLibraryItem(db, log, req) {
     now,
     now
   );
-  log.info('Prop library item created', { item_id: info.lastInsertRowid });
+  log.info('Prop library item created', { item_id: info.lastInsertRowid, user_id: userId });
   return getLibraryItem(db, String(info.lastInsertRowid));
 }
 
@@ -112,34 +117,35 @@ function resolveImageUrl(image_url, local_path) {
 }
 
 // 加入本剧资源库（带 drama_id）
-function addPropToLibrary(db, log, propId) {
+function addPropToLibrary(db, log, propId, userId) {
   const prop = propService.getById(db, Number(propId));
   if (!prop) return { ok: false, error: 'prop not found' };
-  const drama = db.prepare('SELECT id FROM dramas WHERE id = ? AND deleted_at IS NULL').get(prop.drama_id);
+  const drama = db.prepare('SELECT id, user_id FROM dramas WHERE id = ? AND deleted_at IS NULL').get(prop.drama_id);
   if (!drama) return { ok: false, error: 'unauthorized' };
   if (!prop.image_url && !prop.local_path) return { ok: false, error: '道具还没有形象图片' };
   const now = new Date().toISOString();
   const imageUrl = resolveImageUrl(prop.image_url, prop.local_path);
+  const ownerId = drama.user_id || userId || null;
   const info = db.prepare(
-    `INSERT INTO prop_libraries (drama_id, name, description, prompt, image_url, local_path, source_type, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'prop', ?, ?)`
-  ).run(prop.drama_id, prop.name || '', prop.description || null, prop.prompt || null, imageUrl, prop.local_path || null, now, now);
-  log.info('Prop added to drama library', { prop_id: propId, drama_id: prop.drama_id, library_item_id: info.lastInsertRowid });
+    `INSERT INTO prop_libraries (drama_id, user_id, name, description, prompt, image_url, local_path, source_type, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'prop', ?, ?)`
+  ).run(prop.drama_id, ownerId, prop.name || '', prop.description || null, prop.prompt || null, imageUrl, prop.local_path || null, now, now);
+  log.info('Prop added to drama library', { prop_id: propId, drama_id: prop.drama_id, library_item_id: info.lastInsertRowid, user_id: ownerId });
   return { ok: true, item: getLibraryItem(db, String(info.lastInsertRowid)) };
 }
 
 // 加入全局素材库（drama_id = NULL）
-function addPropToMaterialLibrary(db, log, propId) {
+function addPropToMaterialLibrary(db, log, propId, userId) {
   const prop = propService.getById(db, Number(propId));
   if (!prop) return { ok: false, error: 'prop not found' };
   if (!prop.image_url && !prop.local_path) return { ok: false, error: '道具还没有形象图片' };
   const now = new Date().toISOString();
   const imageUrl = resolveImageUrl(prop.image_url, prop.local_path);
   const info = db.prepare(
-    `INSERT INTO prop_libraries (drama_id, name, description, prompt, image_url, local_path, source_type, created_at, updated_at)
-     VALUES (NULL, ?, ?, ?, ?, ?, 'prop', ?, ?)`
-  ).run(prop.name || '', prop.description || null, prop.prompt || null, imageUrl, prop.local_path || null, now, now);
-  log.info('Prop added to material library (global)', { prop_id: propId, library_item_id: info.lastInsertRowid });
+    `INSERT INTO prop_libraries (drama_id, user_id, name, description, prompt, image_url, local_path, source_type, created_at, updated_at)
+     VALUES (NULL, ?, ?, ?, ?, ?, ?, 'prop', ?, ?)`
+  ).run(userId || null, prop.name || '', prop.description || null, prop.prompt || null, imageUrl, prop.local_path || null, now, now);
+  log.info('Prop added to material library (global)', { prop_id: propId, library_item_id: info.lastInsertRowid, user_id: userId });
   return { ok: true, item: getLibraryItem(db, String(info.lastInsertRowid)) };
 }
 

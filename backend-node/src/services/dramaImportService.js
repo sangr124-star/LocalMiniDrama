@@ -99,7 +99,7 @@ function saveExtraImages(storagePath, projectDir, category, files, zipPaths, pre
  * @param {Buffer} zipBuffer
  * @returns {{ drama_id: number, title: string }}
  */
-function importDrama(db, cfg, log, zipBuffer) {
+function importDrama(db, cfg, log, zipBuffer, userId) {
   const storagePath = getStoragePath(cfg);
   const { data, files } = parseZip(zipBuffer);
 
@@ -121,18 +121,18 @@ function importDrama(db, cfg, log, zipBuffer) {
   // 用事务包裹全部写入：任何步骤失败时整体回滚，避免部分导入
   let result;
   const runImport = db.transaction(() => {
-    result = _doImport(db, storagePath, files, data, d, title, metaStr, now, log);
+    result = _doImport(db, storagePath, files, data, d, title, metaStr, now, log, userId);
   });
   runImport();
   return result;
 }
 
-function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
+function _doImport(db, storagePath, files, data, d, title, metaStr, now, log, userId) {
 
   // ---- 创建 drama ----
   const dramaInfo = db.prepare(
-    `INSERT INTO dramas (title, description, genre, style, status, tags, metadata, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO dramas (title, description, genre, style, status, tags, metadata, user_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     title,
     d.description || null,
@@ -141,6 +141,7 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
     d.status || 'draft',
     d.tags || null,
     metaStr,
+    userId || null,
     now,
     now
   );

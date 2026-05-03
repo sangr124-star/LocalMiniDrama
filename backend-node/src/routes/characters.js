@@ -203,7 +203,7 @@ function routes(db, cfg, log, uploadService) {
     addToLibrary: (req, res) => {
       try {
         const category = (req.body || {}).category;
-        const out = characterLibraryService.addCharacterToLibrary(db, log, req.params.id, category);
+        const out = characterLibraryService.addCharacterToLibrary(db, log, req.params.id, category, req.user.id);
         if (!out.ok) {
           if (out.error === 'character not found') return response.notFound(res, '角色不存在');
           return response.badRequest(res, out.error);
@@ -216,7 +216,7 @@ function routes(db, cfg, log, uploadService) {
     },
     addToMaterialLibrary: (req, res) => {
       try {
-        const out = characterLibraryService.addCharacterToMaterialLibrary(db, log, req.params.id);
+        const out = characterLibraryService.addCharacterToMaterialLibrary(db, log, req.params.id, req.user.id);
         if (!out.ok) {
           if (out.error === 'character not found') return response.notFound(res, '角色不存在');
           return response.badRequest(res, out.error);

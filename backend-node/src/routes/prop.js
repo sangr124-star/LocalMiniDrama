@@ -93,7 +93,7 @@ function addToLibrary(db, log) {
   return (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return response.badRequest(res, '无效的ID');
-    const out = propLibraryService.addPropToLibrary(db, log, id);
+    const out = propLibraryService.addPropToLibrary(db, log, id, req.user.id);
     if (!out.ok) {
       if (out.error === 'prop not found') return response.notFound(res, '道具不存在');
       if (out.error === 'unauthorized') return response.forbidden(res, '无权限');
@@ -107,7 +107,7 @@ function addToMaterialLibrary(db, log) {
   return (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return response.badRequest(res, '无效的ID');
-    const out = propLibraryService.addPropToMaterialLibrary(db, log, id);
+    const out = propLibraryService.addPropToMaterialLibrary(db, log, id, req.user.id);
     if (!out.ok) {
       if (out.error === 'prop not found') return response.notFound(res, '道具不存在');
       return response.badRequest(res, out.error);

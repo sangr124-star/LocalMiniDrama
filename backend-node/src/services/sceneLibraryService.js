@@ -19,45 +19,50 @@ function rowToItem(r) {
   };
 }
 
-function listLibraryItems(db, query) {
-  let sql = 'FROM scene_libraries WHERE deleted_at IS NULL';
+function listLibraryItems(db, query, userScope) {
+  let sql = 'FROM scene_libraries sl LEFT JOIN users u ON u.id = sl.user_id WHERE sl.deleted_at IS NULL';
   const params = [];
   if (query.global === '1' || query.global === 1) {
-    sql += ' AND drama_id IS NULL';
+    sql += ' AND sl.drama_id IS NULL';
   } else if (query.drama_id != null && query.drama_id !== '') {
-    sql += ' AND drama_id = ?';
+    sql += ' AND sl.drama_id = ?';
     params.push(Number(query.drama_id));
   }
   if (query.category) {
-    sql += ' AND category = ?';
+    sql += ' AND sl.category = ?';
     params.push(query.category);
   }
   if (query.source_type) {
-    sql += ' AND source_type = ?';
+    sql += ' AND sl.source_type = ?';
     params.push(query.source_type);
   }
   if (query.keyword) {
-    sql += ' AND (location LIKE ? OR description LIKE ? OR prompt LIKE ?)';
+    sql += ' AND (sl.location LIKE ? OR sl.description LIKE ? OR sl.prompt LIKE ?)';
     const k = '%' + query.keyword + '%';
     params.push(k, k, k);
+  }
+  if (userScope && !userScope.isGlobal) {
+    sql += ' AND sl.user_id = ?';
+    params.push(userScope.userId);
   }
   const countRow = db.prepare('SELECT COUNT(*) as total ' + sql).get(...params);
   const total = countRow.total || 0;
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 20));
   const offset = (page - 1) * pageSize;
-  const rows = db.prepare('SELECT * ' + sql + ' ORDER BY created_at DESC LIMIT ? OFFSET ?').all(...params, pageSize, offset);
-  return { items: rows.map(rowToItem), total, page, pageSize };
+  const rows = db.prepare('SELECT sl.*, u.username AS creator_username ' + sql + ' ORDER BY sl.created_at DESC LIMIT ? OFFSET ?').all(...params, pageSize, offset);
+  return { items: rows.map((r) => ({ ...rowToItem(r), creator_username: r.creator_username || null })), total, page, pageSize };
 }
 
-function createLibraryItem(db, log, req) {
+function createLibraryItem(db, log, req, userId) {
   const now = new Date().toISOString();
   const sourceType = req.source_type || 'generated';
   const info = db.prepare(
-    `INSERT INTO scene_libraries (drama_id, location, time, prompt, description, image_url, local_path, category, tags, source_type, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO scene_libraries (drama_id, user_id, location, time, prompt, description, image_url, local_path, category, tags, source_type, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     req.drama_id ?? null,
+    userId || null,
     req.location || '',
     req.time ?? null,
     req.prompt ?? null,
@@ -70,7 +75,7 @@ function createLibraryItem(db, log, req) {
     now,
     now
   );
-  log.info('Scene library item created', { item_id: info.lastInsertRowid });
+  log.info('Scene library item created', { item_id: info.lastInsertRowid, user_id: userId });
   return getLibraryItem(db, String(info.lastInsertRowid));
 }
 
@@ -115,34 +120,36 @@ function resolveImageUrl(image_url, local_path) {
 }
 
 // 加入本剧资源库（带 drama_id）
-function addSceneToLibrary(db, log, sceneId) {
+function addSceneToLibrary(db, log, sceneId, userId) {
   const scene = sceneService.getSceneById(db, Number(sceneId));
   if (!scene) return { ok: false, error: 'scene not found' };
-  const drama = db.prepare('SELECT id FROM dramas WHERE id = ? AND deleted_at IS NULL').get(scene.drama_id);
+  const drama = db.prepare('SELECT id, user_id FROM dramas WHERE id = ? AND deleted_at IS NULL').get(scene.drama_id);
   if (!drama) return { ok: false, error: 'unauthorized' };
   if (!scene.image_url && !scene.local_path) return { ok: false, error: '场景还没有形象图片' };
   const now = new Date().toISOString();
   const imageUrl = resolveImageUrl(scene.image_url, scene.local_path);
+  // 素材库的归属跟随原 drama 的归属（避免把 admin 的剧的素材加到 zhx 的库下）
+  const ownerId = drama.user_id || userId || null;
   const info = db.prepare(
-    `INSERT INTO scene_libraries (drama_id, location, time, prompt, description, image_url, local_path, source_type, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'scene', ?, ?)`
-  ).run(scene.drama_id, scene.location || '', scene.time || null, scene.prompt || null, scene.prompt || null, imageUrl, scene.local_path || null, now, now);
-  log.info('Scene added to drama library', { scene_id: sceneId, drama_id: scene.drama_id, library_item_id: info.lastInsertRowid });
+    `INSERT INTO scene_libraries (drama_id, user_id, location, time, prompt, description, image_url, local_path, source_type, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scene', ?, ?)`
+  ).run(scene.drama_id, ownerId, scene.location || '', scene.time || null, scene.prompt || null, scene.prompt || null, imageUrl, scene.local_path || null, now, now);
+  log.info('Scene added to drama library', { scene_id: sceneId, drama_id: scene.drama_id, library_item_id: info.lastInsertRowid, user_id: ownerId });
   return { ok: true, item: getLibraryItem(db, String(info.lastInsertRowid)) };
 }
 
-// 加入全局素材库（drama_id = NULL）
-function addSceneToMaterialLibrary(db, log, sceneId) {
+// 加入全局素材库（drama_id = NULL，user_id = 操作者）
+function addSceneToMaterialLibrary(db, log, sceneId, userId) {
   const scene = sceneService.getSceneById(db, Number(sceneId));
   if (!scene) return { ok: false, error: 'scene not found' };
   if (!scene.image_url && !scene.local_path) return { ok: false, error: '场景还没有形象图片' };
   const now = new Date().toISOString();
   const imageUrl = resolveImageUrl(scene.image_url, scene.local_path);
   const info = db.prepare(
-    `INSERT INTO scene_libraries (drama_id, location, time, prompt, description, image_url, local_path, source_type, created_at, updated_at)
-     VALUES (NULL, ?, ?, ?, ?, ?, ?, 'scene', ?, ?)`
-  ).run(scene.location || '', scene.time || null, scene.prompt || null, scene.prompt || null, imageUrl, scene.local_path || null, now, now);
-  log.info('Scene added to material library (global)', { scene_id: sceneId, library_item_id: info.lastInsertRowid });
+    `INSERT INTO scene_libraries (drama_id, user_id, location, time, prompt, description, image_url, local_path, source_type, created_at, updated_at)
+     VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, 'scene', ?, ?)`
+  ).run(userId || null, scene.location || '', scene.time || null, scene.prompt || null, scene.prompt || null, imageUrl, scene.local_path || null, now, now);
+  log.info('Scene added to material library (global)', { scene_id: sceneId, library_item_id: info.lastInsertRowid, user_id: userId });
   return { ok: true, item: getLibraryItem(db, String(info.lastInsertRowid)) };
 }
 

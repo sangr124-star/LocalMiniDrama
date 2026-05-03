@@ -24,7 +24,7 @@ function parseJsonColumn(value) {
   }
 }
 
-function createDrama(db, log, req) {
+function createDrama(db, log, req, userId) {
   const now = new Date().toISOString();
   let meta = {};
   if (req.metadata) {
@@ -42,8 +42,8 @@ function createDrama(db, log, req) {
   }
   const metadataStr = Object.keys(meta).length ? JSON.stringify(meta) : null;
   const stmt = db.prepare(`
-    INSERT INTO dramas (title, description, genre, style, metadata, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)
+    INSERT INTO dramas (title, description, genre, style, metadata, status, user_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)
   `);
   const info = stmt.run(
     req.title || '',
@@ -51,11 +51,12 @@ function createDrama(db, log, req) {
     req.genre || null,
     req.style || 'realistic',
     metadataStr,
+    userId || null,
     now,
     now
   );
   const id = info.lastInsertRowid;
-  log.info('Drama created', { drama_id: id });
+  log.info('Drama created', { drama_id: id, user_id: userId });
   return getDramaById(db, id);
 }
 
@@ -161,21 +162,27 @@ function getDrama(db, dramaId, baseUrl) {
   return drama;
 }
 
-function listDramas(db, query) {
-  let sql = 'FROM dramas WHERE deleted_at IS NULL';
+function listDramas(db, query, userScope) {
+  // userScope: { userId, isGlobal }
+  // isGlobal=true 时不加 user_id 过滤（super_admin + ?scope=all）；否则限制到 user_id
+  let sql = 'FROM dramas d LEFT JOIN users u ON u.id = d.user_id WHERE d.deleted_at IS NULL';
   const params = [];
   if (query.status) {
-    sql += ' AND status = ?';
+    sql += ' AND d.status = ?';
     params.push(query.status);
   }
   if (query.genre) {
-    sql += ' AND genre = ?';
+    sql += ' AND d.genre = ?';
     params.push(query.genre);
   }
   if (query.keyword) {
-    sql += ' AND (title LIKE ? OR description LIKE ?)';
+    sql += ' AND (d.title LIKE ? OR d.description LIKE ?)';
     const k = '%' + query.keyword + '%';
     params.push(k, k);
+  }
+  if (userScope && !userScope.isGlobal) {
+    sql += ' AND d.user_id = ?';
+    params.push(userScope.userId);
   }
   const countRow = db.prepare('SELECT COUNT(*) as total ' + sql).get(...params);
   const total = countRow.total || 0;
@@ -183,9 +190,13 @@ function listDramas(db, query) {
   const pageSize = Math.min(100, Math.max(1, parseInt(query.page_size, 10) || 20));
   const offset = (page - 1) * pageSize;
   const list = db.prepare(
-    'SELECT * ' + sql + ' ORDER BY updated_at DESC LIMIT ? OFFSET ?'
+    'SELECT d.*, u.username AS creator_username ' + sql + ' ORDER BY d.updated_at DESC LIMIT ? OFFSET ?'
   ).all(...params, pageSize, offset);
-  const dramas = list.map((r) => rowToDrama(r));
+  const dramas = list.map((r) => {
+    const out = rowToDrama(r);
+    out.creator_username = r.creator_username || null;
+    return out;
+  });
   for (const d of dramas) {
     const episodes = db.prepare(
       'SELECT * FROM episodes WHERE drama_id = ? AND deleted_at IS NULL ORDER BY episode_number ASC'
@@ -277,11 +288,13 @@ function deleteDrama(db, log, dramaId) {
   return true;
 }
 
-function getDramaStats(db) {
-  const total = db.prepare('SELECT COUNT(*) as c FROM dramas WHERE deleted_at IS NULL').get().c;
+function getDramaStats(db, userScope) {
+  const filter = (userScope && !userScope.isGlobal) ? ' AND user_id = ?' : '';
+  const params = (userScope && !userScope.isGlobal) ? [userScope.userId] : [];
+  const total = db.prepare('SELECT COUNT(*) as c FROM dramas WHERE deleted_at IS NULL' + filter).get(...params).c;
   const byStatus = db.prepare(
-    'SELECT status, COUNT(*) as count FROM dramas WHERE deleted_at IS NULL GROUP BY status'
-  ).all();
+    'SELECT status, COUNT(*) as count FROM dramas WHERE deleted_at IS NULL' + filter + ' GROUP BY status'
+  ).all(...params);
   return { total, by_status: byStatus };
 }
 

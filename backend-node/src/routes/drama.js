@@ -3,6 +3,11 @@ const propService = require('../services/propService');
 const response = require('../response');
 const dramaExportService = require('../services/dramaExportService');
 const dramaImportService = require('../services/dramaImportService');
+const { isGlobalScope } = require('../middleware/permissions');
+
+function userScopeFromReq(req) {
+  return { userId: req.user && req.user.id, isGlobal: isGlobalScope(req) };
+}
 
 function createDrama(db, log) {
   return (req, res) => {
@@ -11,7 +16,7 @@ function createDrama(db, log) {
       return response.badRequest(res, '标题不能为空');
     }
     try {
-      const drama = dramaService.createDrama(db, log, body);
+      const drama = dramaService.createDrama(db, log, body, req.user.id);
       response.created(res, drama);
     } catch (err) {
       log.error('Create drama failed', { error: err.message, stack: err.stack });
@@ -42,7 +47,7 @@ function listDramas(db, log) {
         status,
         genre,
         keyword,
-      });
+      }, userScopeFromReq(req));
       response.successWithPagination(res, dramas, total, p, ps);
     } catch (err) {
       log.errorw('List dramas failed', { error: err.message });
@@ -70,7 +75,7 @@ function deleteDrama(db, log) {
 function getDramaStats(db, log) {
   return (req, res) => {
     try {
-      const stats = dramaService.getDramaStats(db);
+      const stats = dramaService.getDramaStats(db, userScopeFromReq(req));
       response.success(res, stats);
     } catch (err) {
       log.errorw('Get drama stats failed', { error: err.message });
@@ -175,7 +180,7 @@ function importDrama(db, cfg, log) {
       if (!req.file || !req.file.buffer) {
         return response.badRequest(res, '请上传 ZIP 文件');
       }
-      const result = dramaImportService.importDrama(db, cfg, log, req.file.buffer);
+      const result = dramaImportService.importDrama(db, cfg, log, req.file.buffer, req.user.id);
       response.created(res, result);
     } catch (err) {
       log.error('Import drama failed', { error: err.message });
@@ -232,7 +237,7 @@ function importExample(db, cfg, log) {
     if (!fs.existsSync(filePath)) return response.notFound(res, '示例文件不存在');
     try {
       const buffer = fs.readFileSync(filePath);
-      const result = dramaImportService.importDrama(db, cfg, log, buffer);
+      const result = dramaImportService.importDrama(db, cfg, log, buffer, req.user.id);
       response.created(res, result);
     } catch (err) {
       log.error('Import example failed', { error: err.message });

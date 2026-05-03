@@ -110,7 +110,7 @@ function routes(db, log, cfg) {
     },
     addToLibrary: (req, res) => {
       try {
-        const out = sceneLibraryService.addSceneToLibrary(db, log, req.params.scene_id);
+        const out = sceneLibraryService.addSceneToLibrary(db, log, req.params.scene_id, req.user.id);
         if (!out.ok) {
           if (out.error === 'scene not found') return response.notFound(res, '场景不存在');
           if (out.error === 'unauthorized') return response.forbidden(res, '无权限');
@@ -124,7 +124,7 @@ function routes(db, log, cfg) {
     },
     addToMaterialLibrary: (req, res) => {
       try {
-        const out = sceneLibraryService.addSceneToMaterialLibrary(db, log, req.params.scene_id);
+        const out = sceneLibraryService.addSceneToMaterialLibrary(db, log, req.params.scene_id, req.user.id);
         if (!out.ok) {
           if (out.error === 'scene not found') return response.notFound(res, '场景不存在');
           return response.badRequest(res, out.error);
