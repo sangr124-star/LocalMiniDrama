@@ -23,6 +23,14 @@ const sceneModelMapRoutes = require('./sceneModelMap');
 const authRoutes = require('./auth');
 const adminRoutes = require('./admin');
 const { buildAuthMiddleware } = require('../middleware/auth');
+const { isPromptHidden } = require('../constants/featureGates');
+
+function denyIfPromptHidden(req, res, next) {
+  if (isPromptHidden(req.user)) {
+    return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: '该功能未开放' } });
+  }
+  next();
+}
 
 function setupRouter(cfg, db, log) {
   const r = express.Router();
@@ -316,9 +324,9 @@ function setupRouter(cfg, db, log) {
   r.put('/settings/generation', settings.updateGenerationSettings);
 
   // ---------- prompt overrides ----------
-  r.get('/settings/prompts', promptOverrides.list);
-  r.put('/settings/prompts/:key', promptOverrides.update);
-  r.delete('/settings/prompts/:key', promptOverrides.reset);
+  r.get('/settings/prompts', denyIfPromptHidden, promptOverrides.list);
+  r.put('/settings/prompts/:key', denyIfPromptHidden, promptOverrides.update);
+  r.delete('/settings/prompts/:key', denyIfPromptHidden, promptOverrides.reset);
 
   // ---------- scene model map ----------
   r.get('/scene-model-map', sceneModelMap.list);

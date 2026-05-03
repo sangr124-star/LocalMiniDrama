@@ -106,7 +106,7 @@
           </el-table>
         </div>
       </el-tab-pane>
-      <el-tab-pane label="高级设置（提示词）" name="prompts">
+      <el-tab-pane v-if="!hidePrompts" label="高级设置（提示词）" name="prompts">
         <div class="tab-content">
           <PromptEditor />
         </div>
@@ -1066,7 +1066,9 @@ import { generationSettingsAPI } from '@/api/prompts'
 import PromptEditor from '@/components/PromptEditor.vue'
 import SceneModelMap from '@/components/SceneModelMap.vue'
 import Sd2AssetManagement from '@/components/Sd2AssetManagement.vue'
+import { getUser } from '@/utils/request'
 
+const hidePrompts = computed(() => !!getUser()?.hide_prompts)
 const activeTab = ref('configs')
 const importFileRef = ref(null)
 

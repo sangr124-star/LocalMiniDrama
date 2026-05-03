@@ -1,11 +1,12 @@
 const bcrypt = require('bcryptjs');
+const { isPromptHidden } = require('../constants/featureGates');
 
 const HARDCODED_ADMIN = { username: 'admin', password: '123456' };
 const SALT_ROUNDS = 10;
 
 function rowToUser(r) {
   if (!r) return null;
-  return {
+  const u = {
     id: r.id,
     username: r.username,
     nickname: r.nickname || '',
@@ -14,6 +15,8 @@ function rowToUser(r) {
     created_at: r.created_at,
     updated_at: r.updated_at,
   };
+  u.hide_prompts = isPromptHidden(u);
+  return u;
 }
 
 function ensureAdminUser(db, log) {
