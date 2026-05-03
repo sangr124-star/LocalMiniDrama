@@ -1,12 +1,11 @@
 const bcrypt = require('bcryptjs');
-const { isPromptHidden } = require('../constants/featureGates');
 
 const HARDCODED_ADMIN = { username: 'admin', password: '123456' };
 const SALT_ROUNDS = 10;
 
 function rowToUser(r) {
   if (!r) return null;
-  const u = {
+  return {
     id: r.id,
     username: r.username,
     nickname: r.nickname || '',
@@ -15,8 +14,6 @@ function rowToUser(r) {
     created_at: r.created_at,
     updated_at: r.updated_at,
   };
-  u.hide_prompts = isPromptHidden(u);
-  return u;
 }
 
 function ensureAdminUser(db, log) {
@@ -53,6 +50,12 @@ function listUsers(db) {
   return rows.map(rowToUser);
 }
 
+const VALID_ROLES = new Set(['user', 'admin', 'super_admin']);
+
+function normalizeRole(role) {
+  return VALID_ROLES.has(role) ? role : 'user';
+}
+
 function createUser(db, { username, password, nickname, role }) {
   if (!username || !password) throw new Error('用户名和密码不能为空');
   if (String(password).length < 6) throw new Error('密码至少 6 位');
@@ -60,7 +63,7 @@ function createUser(db, { username, password, nickname, role }) {
   if (exists) throw new Error('用户名已存在');
   const hash = bcrypt.hashSync(String(password), SALT_ROUNDS);
   const now = new Date().toISOString();
-  const safeRole = role === 'super_admin' ? 'super_admin' : 'user';
+  const safeRole = normalizeRole(role);
   const info = db.prepare(
     `INSERT INTO users (username, password, nickname, role, status, created_at, updated_at)
      VALUES (?, ?, ?, ?, 'active', ?, ?)`
@@ -75,7 +78,7 @@ function updateUser(db, id, patch) {
   const params = [];
   if (patch.nickname !== undefined) { fields.push('nickname = ?'); params.push(patch.nickname || null); }
   if (patch.role !== undefined) {
-    const safeRole = patch.role === 'super_admin' ? 'super_admin' : 'user';
+    const safeRole = normalizeRole(patch.role);
     fields.push('role = ?'); params.push(safeRole);
   }
   if (patch.status !== undefined) {
