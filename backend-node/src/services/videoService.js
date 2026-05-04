@@ -200,6 +200,65 @@ async function processVideoGeneration(db, log, videoGenId) {
     return;
   }
   const now = new Date().toISOString();
+
+  // 计费：从 drama 反查 user_id；durations 已知则估准
+  const creditService = require('./creditService');
+  const { estimateVideo, settleVideo } = require('./creditPricing');
+  let creditUserId = null;
+  try {
+    if (row.drama_id) {
+      const drow = db.prepare('SELECT user_id FROM dramas WHERE id=?').get(row.drama_id);
+      if (drow) creditUserId = drow.user_id || null;
+    }
+  } catch (_) {}
+  let creditLedgerId = null;
+  let creditSnapshot = null;
+  if (creditUserId) {
+    let estDuration = Number(row.duration) || 5;
+    if (row.storyboard_id) {
+      const sb = db.prepare('SELECT duration FROM storyboards WHERE id = ?').get(row.storyboard_id);
+      if (sb && sb.duration > 0) estDuration = sb.duration;
+    }
+    const est = estimateVideo(db, { model: row.model, duration_seconds: estDuration });
+    creditSnapshot = est.snapshot;
+    try {
+      creditLedgerId = creditService.reserve(db, creditUserId, est.estimated, 'video.gen', {
+        service_type: 'video',
+        model: row.model,
+        drama_id: row.drama_id,
+        episode_id: row.storyboard_id ? null : null,
+        scene_key: 'video.gen',
+        price_snapshot: est.snapshot,
+      });
+      log.info('credits reserve', { scope: 'video.gen', user_id: creditUserId, estimated: est.estimated, ledger_id: creditLedgerId });
+    } catch (e) {
+      // 余额不足：直接走失败路径
+      log.warn('[credits] video reserve failed', { err: e.message });
+      setVideoGenFailed(db, videoGenId, e.code === 'INSUFFICIENT_CREDITS' ? '积分不足，无法生成视频' : ('计费失败：' + e.message), now);
+      if (row.task_id) taskService.updateTaskError(db, row.task_id, '积分不足');
+      return;
+    }
+  } else {
+    log.warn('[credits] video.gen called without resolvable user_id, skipping billing', { drama_id: row.drama_id });
+  }
+
+  // 包一个统一的 finalize 函数处理 settle / refund
+  const finalizeCredits = (success, realDuration, reason) => {
+    if (!creditLedgerId) return;
+    try {
+      if (success) {
+        const realCost = settleVideo({ duration_seconds: realDuration }, creditSnapshot);
+        creditService.settle(db, creditLedgerId, realCost, creditSnapshot);
+        log.info('credits settle', { scope: 'video.gen', ledger_id: creditLedgerId, real_cost: realCost });
+      } else {
+        creditService.refund(db, creditLedgerId, reason || 'unknown');
+        log.info('credits refunded', { scope: 'video.gen', ledger_id: creditLedgerId, reason });
+      }
+    } catch (e) {
+      log.error('credits finalize failed', { err: e.message, ledger_id: creditLedgerId });
+    }
+  };
+
   try {
     db.prepare('UPDATE video_generations SET status = ?, updated_at = ? WHERE id = ?').run('processing', now, videoGenId);
     const loadConfig = require('../config').loadConfig;
@@ -270,6 +329,7 @@ async function processVideoGeneration(db, log, videoGenId) {
     });
     const now2 = new Date().toISOString();
     if (result.error) {
+      finalizeCredits(false, null, result.error);
       setVideoGenFailed(db, videoGenId, result.error, now2);
       if (row.task_id) taskService.updateTaskError(db, row.task_id, result.error);
       log.error('Video generation failed', { id: videoGenId, error: result.error });
@@ -309,6 +369,7 @@ async function processVideoGeneration(db, log, videoGenId) {
       }
       if (row.task_id) taskService.updateTaskResult(db, row.task_id, { video_generation_id: videoGenId, video_url: result.video_url, status: 'completed' });
       log.info('Video generation completed', { id: videoGenId, video_url: result.video_url, local_path: localPath });
+      finalizeCredits(true, Number(row.duration) || creditSnapshot?.est_seconds || 5, null);
       return;
     }
     if (result.task_id) {
@@ -353,19 +414,23 @@ async function processVideoGeneration(db, log, videoGenId) {
         }
         if (row.task_id) taskService.updateTaskResult(db, row.task_id, { video_generation_id: videoGenId, video_url: pollResult.video_url, status: 'completed' });
         log.info('Video generation completed (after poll)', { id: videoGenId, local_path: localPath });
+        finalizeCredits(true, Number(pollResult.duration) || Number(row.duration) || creditSnapshot?.est_seconds || 5, null);
       } else {
         setVideoGenFailed(db, videoGenId, pollResult.error || '超时或失败', now3);
         if (row.task_id) taskService.updateTaskError(db, row.task_id, pollResult.error);
+        finalizeCredits(false, null, pollResult.error || '超时或失败');
       }
       return;
     }
     setVideoGenFailed(db, videoGenId, '未返回 task_id 或 video_url', now2);
     if (row.task_id) taskService.updateTaskError(db, row.task_id, '未返回 task_id 或 video_url');
+    finalizeCredits(false, null, '未返回 task_id 或 video_url');
   } catch (err) {
     const now2 = new Date().toISOString();
     setVideoGenFailed(db, videoGenId, err.message, now2);
     if (row && row.task_id) taskService.updateTaskError(db, row.task_id, err.message);
     log.error('Video generation error', { id: videoGenId, error: err.message });
+    finalizeCredits(false, null, err.message);
   }
 }
 
