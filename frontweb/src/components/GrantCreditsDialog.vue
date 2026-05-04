@@ -17,13 +17,15 @@
       </el-form-item>
       <el-form-item label="备注（必填）">
         <el-input v-model="note" type="textarea" :rows="3" placeholder="例如：5月活动赠送 / 客户充值 10 元" />
+        <div v-if="!note.trim()" style="color:#e6a23c;font-size:12px;margin-top:4px;">
+          ⚠ 请填写备注后再提交
+        </div>
       </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
       <el-button
         :type="action === 'grant' ? 'primary' : 'danger'"
-        :disabled="!note.trim() || amount <= 0"
         :loading="submitting"
         @click="submit"
       >确认{{ actionLabel }}</el-button>
@@ -56,6 +58,14 @@ function open(u, act = 'grant') {
 }
 
 async function submit() {
+  if (!note.value.trim()) {
+    ElMessage.warning('备注必填，请填写后再提交')
+    return
+  }
+  if (amount.value <= 0) {
+    ElMessage.warning('金额必须大于 0')
+    return
+  }
   submitting.value = true
   try {
     if (action.value === 'grant') {
