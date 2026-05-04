@@ -9,6 +9,57 @@ const taskService = require('./taskService');
 const { loadConfig } = require('../config');
 const { postJSONWithTimeout } = require('./aiClient');
 const seedance2AssetGuards = require('../utils/seedance2AssetGuards');
+const creditService = require('./creditService');
+const { estimateImage, settleImage } = require('./creditPricing');
+
+/**
+ * 图片生成调用的内部计费助手
+ * - opts.user_id 缺失时跳过计费（兼容旧 caller，写 warn 日志）
+ * - reserve / settle / refund 三态状态机
+ * - 真实张数从 result.image_url（单张）或 result.images[]（多张）推断
+ */
+async function _billedImageCall(db, log, opts, doCall) {
+  const userId = opts && opts.user_id;
+  if (!userId) {
+    if (log) log.warn('[credits] image.gen called without user_id, skipping billing', { model: opts?.model });
+    return doCall();
+  }
+  const { estimated, snapshot } = estimateImage(db, {
+    model: opts.model || 'unknown',
+    n: opts.n || 1,
+  });
+  const ledgerId = creditService.reserve(db, userId, estimated, 'image.gen', {
+    service_type: 'image',
+    model: snapshot.model,
+    drama_id: opts.drama_id,
+    episode_id: opts.episode_id,
+    scene_key: opts.image_type,
+    price_snapshot: snapshot,
+  });
+  if (log) log.info('credits reserve', { scope: 'image.gen', user_id: userId, estimated, ledger_id: ledgerId, model: snapshot.model });
+  try {
+    const result = await doCall();
+    // 关键：图生 caller 失败时常返回 {error: '...'} 而不是 throw，需识别并 refund
+    if (result && result.error) {
+      try { creditService.refund(db, ledgerId, String(result.error).slice(0, 500)); }
+      catch (e2) { if (log) log.error('credits refund failed', { err: e2.message, ledger_id: ledgerId }); }
+      if (log) log.info('credits refunded (image error)', { scope: 'image.gen', ledger_id: ledgerId, reason: result.error });
+      return result; // 仍把错误 result 透传给上层，跟原行为一致
+    }
+    // 单张返回 {image_url}；多张返回 {images:[...]}
+    let realCost = null;
+    try { realCost = settleImage(result, snapshot); }
+    catch (e) { if (log) log.warn('credits settle hook error', { err: e.message }); }
+    try { creditService.settle(db, ledgerId, realCost, snapshot); }
+    catch (e) { if (log) log.error('credits settle failed', { err: e.message, ledger_id: ledgerId }); }
+    if (log) log.info('credits settle', { scope: 'image.gen', ledger_id: ledgerId, real_cost: realCost ?? estimated });
+    return result;
+  } catch (err) {
+    try { creditService.refund(db, ledgerId, err.message || 'unknown'); }
+    catch (e2) { if (log) log.error('credits refund failed', { err: e2.message, ledger_id: ledgerId }); }
+    throw err;
+  }
+}
 
 /** 图生 POST 使用 Node http(s)，默认 10 分钟，避免 undici fetch 大包体/慢链路下模糊失败 */
 const IMAGE_HTTP_TIMEOUT_MS = 600000;
@@ -1298,7 +1349,7 @@ async function callGeminiImageApi(db, config, log, opts) {
  * @param {object} opts - { prompt, model?, size?, quality?, drama_id, preferred_provider?, character_id?, image_type?, image_gen_id }
  * @returns {Promise<{ image_url?: string, error?: string }>}
  */
-async function callImageApi(db, log, opts) {
+async function _callImageApi(db, log, opts) {
   const {
     prompt,
     model: preferredModel,
@@ -1568,6 +1619,7 @@ function createAndGenerateImage(db, log, opts) {
         character_id: character_id,
         image_type,
         image_gen_id: imageGenId,
+        user_id: opts.user_id,
       });
       const now2 = new Date().toISOString();
       if (result.error) {
@@ -1711,6 +1763,11 @@ function createAndGenerateImage(db, log, opts) {
 
   const row = db.prepare('SELECT * FROM image_generations WHERE id = ?').get(imageGenId);
   return row ? rowToItem(row) : { id: imageGenId, task_id: taskId, status: 'pending', drama_id: dramaIdNum, character_id: charIdNum, scene_id: sceneIdNum, prompt, model, size, quality, created_at: now, updated_at: now };
+}
+
+// 对外的计费版 callImageApi：reserve → 调原 _callImageApi → settle/refund
+async function callImageApi(db, log, opts) {
+  return _billedImageCall(db, log, opts, () => _callImageApi(db, log, opts));
 }
 
 function rowToItem(r) {
