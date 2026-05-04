@@ -1,7 +1,63 @@
 // 与 Go pkg/ai + application/services/ai_service 对齐：读取 ai_service_configs，调用 OpenAI 兼容的 chat completions
 const aiConfigService = require('./aiConfigService');
+const creditService = require('./creditService');
+const { estimateText, settleText } = require('./creditPricing');
 const https = require('https');
 const http = require('http');
+
+/**
+ * 文本/视觉调用的内部计费助手
+ * @param {object} db
+ * @param {object} log
+ * @param {string} scope          'text.chat' / 'text.stream' / 'text.vision'
+ * @param {object} opts           至少含 user_id / model / userPrompt / max_tokens 等
+ * @param {() => Promise<{content:string, usage?:object}>} doCall
+ * @returns {Promise<string>}      返回 content 字符串（保持向后兼容）
+ *
+ * 行为：
+ * - 若 opts.user_id 缺失：跳过计费直接调用（兼容旧 caller，但日志告警）
+ * - reserve 失败（余额不足）：throw InsufficientCreditsError
+ * - doCall 失败：refund 并 rethrow
+ * - doCall 成功：用真实 usage 结算
+ */
+async function _billedTextCall(db, log, scope, opts, doCall) {
+  const userId = opts && opts.user_id;
+  if (!userId) {
+    if (log) log.warn(`[credits] ${scope} called without user_id, skipping billing`, { model: opts?.model });
+    const r = await doCall();
+    return r.content;
+  }
+  const { estimated, snapshot } = estimateText(db, {
+    model: opts.model || 'unknown',
+    userPrompt: opts.userPrompt,
+    systemPrompt: opts.systemPrompt,
+    max_tokens: opts.max_tokens,
+  });
+  const ledgerId = creditService.reserve(db, userId, estimated, scope, {
+    service_type: 'text',
+    model: snapshot.model,
+    drama_id: opts.drama_id,
+    episode_id: opts.episode_id,
+    scene_key: opts.scene_key,
+    price_snapshot: snapshot,
+  });
+  if (log) log.info('credits reserve', { scope, user_id: userId, estimated, ledger_id: ledgerId, model: snapshot.model });
+  try {
+    const r = await doCall();
+    let realCost = null;
+    try { realCost = settleText(r, snapshot); }
+    catch (e) { if (log) log.warn('credits settle hook error', { err: e.message }); }
+    try { creditService.settle(db, ledgerId, realCost, snapshot); }
+    catch (e) { if (log) log.error('credits settle failed', { err: e.message, ledger_id: ledgerId }); }
+    if (log) log.info('credits settle', { scope, ledger_id: ledgerId, real_cost: realCost ?? estimated, has_usage: !!r.usage });
+    return r.content;
+  } catch (err) {
+    try { creditService.refund(db, ledgerId, err.message || 'unknown'); }
+    catch (e2) { if (log) log.error('credits refund failed', { err: e2.message, ledger_id: ledgerId }); }
+    if (log) log.info('credits refunded', { scope, ledger_id: ledgerId, reason: err.message });
+    throw err;
+  }
+}
 
 /**
  * 非流式 POST，发送 JSON body，等待完整 HTTP 响应后返回。
@@ -39,9 +95,9 @@ function postJSONNonStream(url, headers, body, timeoutMs = 120000) {
           const content = json.choices?.[0]?.message?.content
             || json.choices?.[0]?.message?.reasoning_content
             || null;
-          resolve({ status: res.statusCode, body: content, raw });
+          resolve({ status: res.statusCode, body: content, raw, usage: json.usage || null });
         } catch (_) {
-          resolve({ status: res.statusCode, body: null, raw });
+          resolve({ status: res.statusCode, body: null, raw, usage: null });
         }
       });
       res.on('error', reject);
@@ -115,8 +171,12 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const mod = parsed.protocol === 'https:' ? https : http;
-    // 强制开启流式输出
-    const streamBody = { ...body, stream: true };
+    // 强制开启流式输出 + 请求最后带 usage（OpenAI 兼容协议）
+    const streamBody = {
+      ...body,
+      stream: true,
+      stream_options: { ...(body.stream_options || {}), include_usage: true },
+    };
     const bodyStr = JSON.stringify(streamBody);
     const reqHeaders = {
       'Content-Type': 'application/json',
@@ -156,6 +216,7 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
       let accumulated = '';
       let sseBuffer = '';
       let firstToken = true;
+      let lastUsage = null; // 最后一条 chunk 通常带 usage 字段（need stream_options.include_usage）
       resetSilenceTimer();
 
       res.on('data', (chunk) => {
@@ -171,6 +232,7 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
           if (data === '[DONE]') continue;
           try {
             const evt = JSON.parse(data);
+            if (evt.usage) lastUsage = evt.usage;
             const delta = evt.choices?.[0]?.delta?.content;
             if (delta) {
               if (firstToken) {
@@ -186,7 +248,7 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
 
       res.on('end', () => {
         clearTimeout(silenceTimer);
-        resolve({ status: statusCode, body: accumulated });
+        resolve({ status: statusCode, body: accumulated, usage: lastUsage });
       });
       res.on('error', (e) => { clearTimeout(silenceTimer); reject(e); });
     });
@@ -335,24 +397,30 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
   };
   const startMs = Date.now();
   log.info('AI generateText request', { url: url.slice(0, 60), model, max_tokens: finalMaxTokens ?? '(model default)', json_mode, stream: true });
-  const res = await postJSONStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 60000, (receivedLen, event, accumulated) => {
-    if (event === 'first_token') {
-      log.info('AI stream first token', { model, ttft_ms: Date.now() - startMs });
-    } else if (receivedLen > 0 && receivedLen % 500 < 20) {
-      // 每积累约 500 字符记录一次进度
-      log.info('AI stream progress', { model, received_chars: receivedLen, elapsed_ms: Date.now() - startMs });
-    }
-    // 调用者提供的流式回调（如分镜增量解析），传入当前已积累的完整文本
-    if (streamCallback && accumulated) streamCallback(accumulated);
-  });
-  // 流式模式下 res.body 已是拼接好的完整文本内容（非 JSON）
-  const content = res.body;
-  const elapsedMs = Date.now() - startMs;
-  if (!content) {
-    throw new Error('AI 返回内容为空');
-  }
-  log.info('AI raw response received', { model, text_length: content.length, elapsed_ms: elapsedMs, text_preview: content.slice(0, 200) });
-  return content;
+
+  return _billedTextCall(db, log, 'text.chat',
+    { ...options, model, userPrompt, systemPrompt, max_tokens: finalMaxTokens },
+    async () => {
+      const res = await postJSONStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 60000, (receivedLen, event, accumulated) => {
+        if (event === 'first_token') {
+          log.info('AI stream first token', { model, ttft_ms: Date.now() - startMs });
+        } else if (receivedLen > 0 && receivedLen % 500 < 20) {
+          // 每积累约 500 字符记录一次进度
+          log.info('AI stream progress', { model, received_chars: receivedLen, elapsed_ms: Date.now() - startMs });
+        }
+        // 调用者提供的流式回调（如分镜增量解析），传入当前已积累的完整文本
+        if (streamCallback && accumulated) streamCallback(accumulated);
+      });
+      // 流式模式下 res.body 已是拼接好的完整文本内容（非 JSON）
+      const content = res.body;
+      const elapsedMs = Date.now() - startMs;
+      if (!content) {
+        throw new Error('AI 返回内容为空');
+      }
+      log.info('AI raw response received', { model, text_length: content.length, elapsed_ms: elapsedMs, text_preview: content.slice(0, 200), usage: res.usage });
+      return { content, usage: res.usage };
+    },
+  );
 }
 
 /**
@@ -437,28 +505,33 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
     json_mode,
     stream: true,
   });
-  let lastLen = 0;
-  const res = await postJSONStream(
-    url,
-    { Authorization: 'Bearer ' + (config.api_key || '') },
-    body,
-    silenceMs,
-    (receivedLen, event, accumulated) => {
-      if (event === 'first_token') {
-        log.info('AI stream first token', { model, ttft_ms: Date.now() - startMs });
+  return _billedTextCall(db, log, 'text.stream',
+    { ...options, model, userPrompt, systemPrompt, max_tokens: finalMaxTokens },
+    async () => {
+      let lastLen = 0;
+      const res = await postJSONStream(
+        url,
+        { Authorization: 'Bearer ' + (config.api_key || '') },
+        body,
+        silenceMs,
+        (receivedLen, event, accumulated) => {
+          if (event === 'first_token') {
+            log.info('AI stream first token', { model, ttft_ms: Date.now() - startMs });
+          }
+          if (!accumulated || accumulated.length <= lastLen) return;
+          const delta = accumulated.slice(lastLen);
+          lastLen = accumulated.length;
+          if (onDelta && delta) onDelta(delta);
+        }
+      );
+      const content = res.body;
+      if (!content) {
+        throw new Error('AI 返回内容为空');
       }
-      if (!accumulated || accumulated.length <= lastLen) return;
-      const delta = accumulated.slice(lastLen);
-      lastLen = accumulated.length;
-      if (onDelta && delta) onDelta(delta);
-    }
+      log.info('AI streamGenerateText done', { model, text_length: content.length, elapsed_ms: Date.now() - startMs, usage: res.usage });
+      return { content, usage: res.usage };
+    },
   );
-  const content = res.body;
-  if (!content) {
-    throw new Error('AI 返回内容为空');
-  }
-  log.info('AI streamGenerateText done', { model, text_length: content.length, elapsed_ms: Date.now() - startMs });
-  return content;
 }
 
 /**
@@ -586,25 +659,30 @@ async function generateTextWithVision(db, log, serviceType, userPrompt, systemPr
   };
 
   const startMs = Date.now();
-  let res;
-  try {
-    // 使用非流式请求：视觉分析响应短，且流式对推理模型（o1/o3/o4）和部分代理兼容性差
-    res = await postJSONNonStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 120000);
-  } catch (httpErr) {
-    log.error('[Vision] HTTP 请求失败', { model, url: url.slice(0, 80), error: httpErr.message });
-    throw httpErr;
-  }
-  const content = res.body;
-  if (!content) {
-    log.error('[Vision] 返回内容为空', {
-      model,
-      status: res.status,
-      raw_response: (res.raw || '').slice(0, 300),
-    });
-    throw new Error(`AI vision 返回内容为空（HTTP ${res.status}），原始响应：${(res.raw || '').slice(0, 200)}`);
-  }
-  log.info('[Vision] 请求成功', { model, elapsed_ms: Date.now() - startMs, result_len: content.length, result_preview: content.slice(0, 100) });
-  return content.trim();
+  return _billedTextCall(db, log, 'text.vision',
+    { ...options, model, userPrompt, systemPrompt, max_tokens: maxTok },
+    async () => {
+      let res;
+      try {
+        // 使用非流式请求：视觉分析响应短，且流式对推理模型（o1/o3/o4）和部分代理兼容性差
+        res = await postJSONNonStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 120000);
+      } catch (httpErr) {
+        log.error('[Vision] HTTP 请求失败', { model, url: url.slice(0, 80), error: httpErr.message });
+        throw httpErr;
+      }
+      const content = res.body;
+      if (!content) {
+        log.error('[Vision] 返回内容为空', {
+          model,
+          status: res.status,
+          raw_response: (res.raw || '').slice(0, 300),
+        });
+        throw new Error(`AI vision 返回内容为空（HTTP ${res.status}），原始响应：${(res.raw || '').slice(0, 200)}`);
+      }
+      log.info('[Vision] 请求成功', { model, elapsed_ms: Date.now() - startMs, result_len: content.length, result_preview: content.slice(0, 100), usage: res.usage });
+      return { content: content.trim(), usage: res.usage };
+    },
+  );
 }
 
 const EXTRACT_PROMPTS = {
