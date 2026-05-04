@@ -59,7 +59,7 @@ function routes(db, log, cfg) {
         response.success(res, { local_path: result.local_path, url: result.local_path ? '/static/' + result.local_path : '', tts_kind: kind });
       } catch (err) {
         log.error('audio extract', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
 
