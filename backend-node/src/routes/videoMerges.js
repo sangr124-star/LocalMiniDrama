@@ -10,7 +10,7 @@ function routes(db, log) {
         response.success(res, items);
       } catch (err) {
         log.error('video-merges list', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     create: (req, res) => {
@@ -20,7 +20,7 @@ function routes(db, log) {
         response.success(res, { merge_id: rec.merge_id, task_id: rec.task_id, ...rec });
       } catch (err) {
         log.error('video-merges create', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     get: (req, res) => {
@@ -30,7 +30,7 @@ function routes(db, log) {
         response.success(res, item);
       } catch (err) {
         log.error('video-merges get', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     delete: (req, res) => {
@@ -40,7 +40,7 @@ function routes(db, log) {
         response.success(res, { message: '删除成功' });
       } catch (err) {
         log.error('video-merges delete', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
   };

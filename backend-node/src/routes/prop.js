@@ -140,7 +140,7 @@ function generatePropPrompt(db, log, cfg) {
       response.success(res, { message: '提示词已生成', prompt: out.prompt });
     } catch (err) {
       log.error('generatePropPrompt failed', { error: err.message });
-      response.internalError(res, err.message);
+      response.internalError(res, err);
     }
   };
 }
@@ -158,7 +158,7 @@ function extractPropFromImage(db, log, cfg) {
       response.success(res, { message: '道具描述已提取', description: out.description });
     } catch (err) {
       log.error('extractPropFromImage failed', { error: err.message });
-      response.internalError(res, err.message);
+      response.internalError(res, err);
     }
   };
 }

@@ -24,7 +24,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { character: row });
       } catch (err) {
         log.error('characters getOne', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     update: (req, res) => {
@@ -37,7 +37,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '保存成功' });
       } catch (err) {
         log.error('characters update', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     delete: (req, res) => {
@@ -50,7 +50,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '删除成功' });
       } catch (err) {
         log.error('characters delete', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     batchGenerateImages: (req, res) => {
@@ -81,7 +81,7 @@ function routes(db, cfg, log, uploadService) {
         });
       } catch (err) {
         log.error('characters batch-generate-images', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     generateImage: async (req, res) => {
@@ -106,7 +106,7 @@ function routes(db, cfg, log, uploadService) {
         });
       } catch (err) {
         log.error('characters generate-image', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     uploadImage: (req, res) => {
@@ -141,7 +141,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '上传成功', url, local_path, filename: req.file.originalname, size: req.file.size });
       } catch (err) {
         log.error('characters upload-image', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     putImage: (req, res) => {
@@ -181,7 +181,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '保存成功' });
       } catch (err) {
         log.error('characters put image', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     imageFromLibrary: (req, res) => {
@@ -197,7 +197,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '应用成功' });
       } catch (err) {
         log.error('characters image-from-library', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     addToLibrary: (req, res) => {
@@ -211,7 +211,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '已加入本剧角色库', item: out.item });
       } catch (err) {
         log.error('characters add-to-library', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     addToMaterialLibrary: (req, res) => {
@@ -224,7 +224,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '已加入全局素材库', item: out.item });
       } catch (err) {
         log.error('characters add-to-material-library', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     extractAnchors: (req, res) => {
@@ -253,7 +253,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '四视图生成任务已提交', image_generation: out.image_generation });
       } catch (err) {
         log.error('characters generate-four-view-image', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     generatePrompt: async (req, res) => {
@@ -269,7 +269,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '提示词已生成', polished_prompt: out.polished_prompt });
       } catch (err) {
         log.error('characters generate-prompt', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     extractFromImage: async (req, res) => {
@@ -282,7 +282,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '外貌描述已提取', appearance: out.appearance });
       } catch (err) {
         log.error('characters extract-from-image', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     /** 即梦素材库 asset 注册（Seedance 2.0 等视频引用 asset://） */
@@ -296,7 +296,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: 'SD2 素材认证已更新', seedance2_asset: out.seedance2_asset });
       } catch (err) {
         log.error('characters sd2-certify', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     sd2CertifyRefresh: async (req, res) => {
@@ -309,7 +309,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '认证状态已刷新', seedance2_asset: out.seedance2_asset });
       } catch (err) {
         log.error('characters sd2-certify-refresh', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
   };

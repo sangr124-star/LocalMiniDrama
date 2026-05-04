@@ -19,7 +19,7 @@ function buildAuthRoutes(db, log) {
         response.success(res, { token, user });
       } catch (err) {
         log.error('auth.login', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
 

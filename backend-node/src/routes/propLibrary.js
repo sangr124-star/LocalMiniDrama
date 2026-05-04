@@ -12,7 +12,7 @@ function routes(db, cfg, log) {
         response.successWithPagination(res, items, total, page, pageSize);
       } catch (err) {
         log.error('prop-library list', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     create: (req, res) => {
@@ -21,7 +21,7 @@ function routes(db, cfg, log) {
         response.created(res, item);
       } catch (err) {
         log.error('prop-library create', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     get: (req, res) => {
@@ -31,7 +31,7 @@ function routes(db, cfg, log) {
         response.success(res, item);
       } catch (err) {
         log.error('prop-library get', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     update: (req, res) => {
@@ -41,7 +41,7 @@ function routes(db, cfg, log) {
         response.success(res, item);
       } catch (err) {
         log.error('prop-library update', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     delete: (req, res) => {
@@ -51,7 +51,7 @@ function routes(db, cfg, log) {
         response.success(res, { message: '删除成功' });
       } catch (err) {
         log.error('prop-library delete', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
   };

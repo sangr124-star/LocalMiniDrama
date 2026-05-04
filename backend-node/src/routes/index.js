@@ -22,6 +22,7 @@ const promptOverridesRoutes = require('./promptOverrides');
 const sceneModelMapRoutes = require('./sceneModelMap');
 const authRoutes = require('./auth');
 const adminRoutes = require('./admin');
+const creditRoutes = require('./credits');
 const { buildAuthMiddleware } = require('../middleware/auth');
 const { requireSuperAdmin, requireAdminOrAbove } = require('../middleware/permissions');
 const { buildOwnershipMiddleware } = require('../middleware/ownership');
@@ -49,6 +50,23 @@ function setupRouter(cfg, db, log) {
   r.put('/admin/users/:id', requireAdminOrAbove, admin.updateUser);
   r.post('/admin/users/:id/reset-password', requireAdminOrAbove, admin.resetPassword);
   r.delete('/admin/users/:id', requireAdminOrAbove, admin.deleteUser);
+
+  // ---------- 积分体系 ----------
+  const credits = creditRoutes(db, log);
+  r.get('/credits/balance', credits.myBalance);
+  r.get('/credits/ledger', credits.myLedger);
+  r.get('/credits/users/:id/balance', requireAdminOrAbove, credits.userBalance);
+  r.get('/credits/users/:id/ledger', requireAdminOrAbove, credits.userLedger);
+  r.post('/credits/users/:id/grant', requireAdminOrAbove, credits.grant);
+  r.post('/credits/users/:id/deduct', requireSuperAdmin, credits.deduct);
+  r.get('/credits/pricing', requireSuperAdmin, credits.listPricing);
+  r.post('/credits/pricing', requireSuperAdmin, credits.createPricing);
+  r.put('/credits/pricing/:id', requireSuperAdmin, credits.updatePricing);
+  r.delete('/credits/pricing/:id', requireSuperAdmin, credits.deletePricing);
+  r.get('/credits/stats', requireSuperAdmin, credits.stats);
+  r.get('/credits/ledger/global', requireSuperAdmin, credits.globalLedger);
+  r.get('/credits/settings', requireSuperAdmin, credits.getSettings);
+  r.put('/credits/settings', requireSuperAdmin, credits.updateSettings);
 
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);
@@ -98,7 +116,7 @@ function setupRouter(cfg, db, log) {
       response.success(res, result);
     } catch (err) {
       log.error('dramas import-novel', { error: err.message });
-      response.internalError(res, err.message);
+      response.internalError(res, err);
     }
   });
   r.get('/dramas/examples', drama.listExamples);
@@ -222,7 +240,7 @@ function setupRouter(cfg, db, log) {
       response.success(res, { description: out.description });
     } catch (err) {
       log.error('extract-description-from-image', { error: err.message });
-      response.internalError(res, err.message);
+      response.internalError(res, err);
     }
   });
 

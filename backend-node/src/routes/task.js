@@ -18,7 +18,7 @@ function getResourceTasks(db, log) {
       response.success(res, tasks);
     } catch (err) {
       log.errorw('Get resource tasks failed', { error: err.message });
-      response.internalError(res, err.message);
+      response.internalError(res, err);
     }
   };
 }

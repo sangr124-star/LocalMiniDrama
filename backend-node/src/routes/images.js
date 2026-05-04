@@ -12,7 +12,7 @@ function routes(db, cfg, log) {
         response.successWithPagination(res, items, total, page, pageSize);
       } catch (err) {
         log.error('images list', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     create: (req, res) => {
@@ -22,7 +22,7 @@ function routes(db, cfg, log) {
         response.created(res, rec);
       } catch (err) {
         log.error('images create', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     get: (req, res) => {
@@ -32,7 +32,7 @@ function routes(db, cfg, log) {
         response.success(res, item);
       } catch (err) {
         log.error('images get', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     delete: (req, res) => {
@@ -42,7 +42,7 @@ function routes(db, cfg, log) {
         response.success(res, { message: '删除成功' });
       } catch (err) {
         log.error('images delete', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     scene: (req, res) => {
@@ -52,7 +52,7 @@ function routes(db, cfg, log) {
         response.success(res, { task_id: task.id });
       } catch (err) {
         log.error('images scene', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     episodeBackgrounds: (req, res) => {
@@ -61,7 +61,7 @@ function routes(db, cfg, log) {
         response.success(res, list);
       } catch (err) {
         log.error('images episode backgrounds', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     episodeBackgroundsExtract: (req, res) => {
@@ -90,7 +90,7 @@ function routes(db, cfg, log) {
         response.success(res, []);
       } catch (err) {
         log.error('images episode batch', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     upload: (req, res) => {
@@ -100,7 +100,7 @@ function routes(db, cfg, log) {
         response.created(res, item);
       } catch (err) {
         log.error('images upload', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
   };

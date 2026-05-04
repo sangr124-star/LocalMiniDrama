@@ -245,7 +245,7 @@ function routes(db, log) {
         response.created(res, sb);
       } catch (err) {
         log.error('storyboards create', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     insertBefore: (req, res) => {
@@ -255,7 +255,7 @@ function routes(db, log) {
         response.created(res, sb);
       } catch (err) {
         log.error('storyboards insertBefore', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     getOne: (req, res) => {
@@ -265,7 +265,7 @@ function routes(db, log) {
         response.success(res, sb);
       } catch (err) {
         log.error('storyboards getOne', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     update: (req, res) => {
@@ -275,7 +275,7 @@ function routes(db, log) {
         response.success(res, sb);
       } catch (err) {
         log.error('storyboards update', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     delete: (req, res) => {
@@ -285,7 +285,7 @@ function routes(db, log) {
         response.success(res, { message: '删除成功' });
       } catch (err) {
         log.error('storyboards delete', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     framePrompt: (req, res) => {
@@ -305,7 +305,7 @@ function routes(db, log) {
         if (err.message && (err.message.includes('分镜不存在') || err.message.includes('不支持的'))) {
           return response.badRequest(res, err.message);
         }
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     framePromptsGet: (req, res) => {
@@ -314,7 +314,7 @@ function routes(db, log) {
         response.success(res, { frame_prompts: list });
       } catch (err) {
         log.error('storyboards frame-prompts', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     episodeStoryboardsGenerate: (req, res) => {
@@ -329,7 +329,7 @@ function routes(db, log) {
         response.success(res, { task_id: taskId, status: 'pending', message: '分镜头生成任务已创建，正在后台处理...' });
       } catch (err) {
         log.error('episode storyboards generate', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     episodeStoryboardsGet: (req, res) => {
@@ -338,7 +338,7 @@ function routes(db, log) {
         response.success(res, { storyboards: list, total: list.length });
       } catch (err) {
         log.error('episode storyboards get', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
 
@@ -482,7 +482,7 @@ function routes(db, log) {
         response.success(res, { polished_prompt: polished });
       } catch (err) {
         log.error('storyboards polishPrompt', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
 
@@ -520,7 +520,7 @@ function routes(db, log) {
         response.success(res, { universal_segment_text: text });
       } catch (err) {
         log.error('storyboards generateUniversalSegmentPrompt', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
 
@@ -997,7 +997,7 @@ function routes(db, log) {
         response.success(res, { local_path: newRelPath, width: newW, height: newH });
       } catch (err) {
         log.error('storyboards upscale', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
 
@@ -1046,7 +1046,7 @@ function routes(db, log) {
         response.success(res, { total: rows.length, updated });
       } catch (err) {
         log.error('storyboards batchInferParams', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
   };

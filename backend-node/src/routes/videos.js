@@ -12,7 +12,7 @@ function routes(db, log) {
         response.successWithPagination(res, items, total, page, pageSize);
       } catch (err) {
         log.error('videos list', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     create: (req, res) => {
@@ -73,7 +73,7 @@ function routes(db, log) {
         response.created(res, item || { id: videoGenId, task_id: task.id, status: 'processing' });
       } catch (err) {
         log.error('videos create', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     get: (req, res) => {
@@ -83,7 +83,7 @@ function routes(db, log) {
         response.success(res, item);
       } catch (err) {
         log.error('videos get', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     delete: (req, res) => {
@@ -93,7 +93,7 @@ function routes(db, log) {
         response.success(res, { message: '删除成功' });
       } catch (err) {
         log.error('videos delete', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     fromImage: (req, res) => {
@@ -102,7 +102,7 @@ function routes(db, log) {
         response.success(res, { task_id: task.id });
       } catch (err) {
         log.error('videos fromImage', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     episodeBatch: (req, res) => {
@@ -110,7 +110,7 @@ function routes(db, log) {
         response.success(res, []);
       } catch (err) {
         log.error('videos episode batch', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
   };

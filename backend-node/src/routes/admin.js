@@ -20,7 +20,7 @@ function buildAdminRoutes(db, log) {
         response.success(res, { items: userService.listUsers(db) });
       } catch (err) {
         log.error('admin.listUsers', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
 

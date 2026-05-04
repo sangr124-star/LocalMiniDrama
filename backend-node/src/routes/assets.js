@@ -10,7 +10,7 @@ function routes(db, log) {
         response.successWithPagination(res, items, total, page, pageSize);
       } catch (err) {
         log.error('assets list', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     create: (req, res) => {
@@ -19,7 +19,7 @@ function routes(db, log) {
         response.created(res, item);
       } catch (err) {
         log.error('assets create', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     get: (req, res) => {
@@ -29,7 +29,7 @@ function routes(db, log) {
         response.success(res, item);
       } catch (err) {
         log.error('assets get', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     update: (req, res) => {
@@ -39,7 +39,7 @@ function routes(db, log) {
         response.success(res, item);
       } catch (err) {
         log.error('assets update', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     delete: (req, res) => {
@@ -49,7 +49,7 @@ function routes(db, log) {
         response.success(res, { message: '删除成功' });
       } catch (err) {
         log.error('assets delete', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     importImage: (req, res) => {
@@ -59,7 +59,7 @@ function routes(db, log) {
         response.created(res, item);
       } catch (err) {
         log.error('assets import image', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     importVideo: (req, res) => {
@@ -69,7 +69,7 @@ function routes(db, log) {
         response.created(res, item);
       } catch (err) {
         log.error('assets import video', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
   };

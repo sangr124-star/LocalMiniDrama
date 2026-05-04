@@ -80,7 +80,7 @@ function routes(db, log) {
         response.success(res, { prompts });
       } catch (err) {
         log.error('prompts list', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     update: (req, res) => {
@@ -100,7 +100,7 @@ function routes(db, log) {
         response.success(res, { ok: true, key });
       } catch (err) {
         log.error('prompts update', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
     reset: (req, res) => {
@@ -116,7 +116,7 @@ function routes(db, log) {
         response.success(res, { ok: true, key });
       } catch (err) {
         log.error('prompts reset', { error: err.message });
-        response.internalError(res, err.message);
+        response.internalError(res, err);
       }
     },
   };

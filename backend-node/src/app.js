@@ -102,6 +102,28 @@ function createApp() {
   });
 
   app.use((err, req, res, next) => {
+    // 识别积分不足错误，统一返回 402 + 详细 JSON
+    if (err && err.code === 'INSUFFICIENT_CREDITS') {
+      log.info('Insufficient credits 402', { path: req.path, required: err.required, balance: err.balance });
+      if (!res.headersSent) {
+        return res.status(402).json({
+          success: false,
+          error: {
+            code: 'INSUFFICIENT_CREDITS',
+            message: '积分不足，无法完成本次调用',
+            required: err.required,
+            current_balance: err.balance,
+            shortfall: err.shortfall,
+            scope: err.scope,
+            service_type: err.service_type,
+            model: err.model,
+            hint: '请联系管理员充值，或在「我的积分」页查看消耗明细',
+          },
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return;
+    }
     log.errorw('Unhandled error', { error: err.message, path: req.path });
     if (!res.headersSent) {
       const isFileTooLarge = err.code === 'LIMIT_FILE_SIZE' || (err.message && err.message.includes('File too large'));
