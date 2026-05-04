@@ -32,7 +32,7 @@ function buildAdminRoutes(db, log) {
         if (!isSuperAdmin(req.user)) {
           role = 'user';
         }
-        const user = userService.createUser(db, { username, password, nickname, role });
+        const user = userService.createUser(db, { username, password, nickname, role, created_by: req.user.id });
         response.success(res, { user });
       } catch (err) {
         log.error('admin.createUser', { error: err.message });

@@ -11,6 +11,10 @@ function rowToUser(r) {
     nickname: r.nickname || '',
     role: r.role,
     status: r.status,
+    created_by: r.created_by != null ? r.created_by : null,
+    credit_balance: r.credit_balance != null ? r.credit_balance : 0,
+    credit_total_recharged: r.credit_total_recharged != null ? r.credit_total_recharged : 0,
+    credit_total_consumed: r.credit_total_consumed != null ? r.credit_total_consumed : 0,
     created_at: r.created_at,
     updated_at: r.updated_at,
   };
@@ -56,7 +60,7 @@ function normalizeRole(role) {
   return VALID_ROLES.has(role) ? role : 'user';
 }
 
-function createUser(db, { username, password, nickname, role }) {
+function createUser(db, { username, password, nickname, role, created_by = null }) {
   if (!username || !password) throw new Error('用户名和密码不能为空');
   if (String(password).length < 6) throw new Error('密码至少 6 位');
   const exists = findByUsername(db, username);
@@ -65,10 +69,27 @@ function createUser(db, { username, password, nickname, role }) {
   const now = new Date().toISOString();
   const safeRole = normalizeRole(role);
   const info = db.prepare(
-    `INSERT INTO users (username, password, nickname, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'active', ?, ?)`
-  ).run(username, hash, nickname || null, safeRole, now, now);
-  return rowToUser(findById(db, info.lastInsertRowid));
+    `INSERT INTO users (username, password, nickname, role, status, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`
+  ).run(username, hash, nickname || null, safeRole, created_by || null, now, now);
+  const newUser = rowToUser(findById(db, info.lastInsertRowid));
+
+  // 注册赠送：仅对 role='user' 触发；从 global_settings 读金额
+  if (safeRole === 'user') {
+    try {
+      const row = db.prepare(`SELECT value FROM global_settings WHERE key='credits.signup_bonus'`).get();
+      const bonus = Math.max(0, Math.ceil(Number(row?.value) || 0));
+      if (bonus > 0) {
+        const creditService = require('./creditService');
+        creditService.grant(db, newUser.id, bonus, created_by || newUser.id, '注册赠送', 'system.signup_bonus');
+        newUser.credit_balance = bonus;
+        newUser.credit_total_recharged = bonus;
+      }
+    } catch (e) {
+      // 赠送失败不阻塞用户创建
+    }
+  }
+  return newUser;
 }
 
 function updateUser(db, id, patch) {
