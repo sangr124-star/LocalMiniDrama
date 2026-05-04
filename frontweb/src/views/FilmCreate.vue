@@ -2162,7 +2162,7 @@ import { characterAPI } from '@/api/characters'
 import { propAPI } from '@/api/props'
 import { sceneAPI } from '@/api/scenes'
 import { taskAPI } from '@/api/task'
-import { getUser } from '@/utils/request'
+import request, { getUser } from '@/utils/request'
 
 const isSuperAdmin = computed(() => getUser()?.role === 'super_admin')
 import { imagesAPI } from '@/api/images'
@@ -4095,19 +4095,12 @@ async function onTtsSbDialogue(sb) {
   }
   ttsSbIds.add(sb.id)
   try {
-    const res = await fetch('/api/v1/audio/extract', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ storyboard_id: sb.id, text: sb.dialogue, tts_kind: 'dialogue' }),
+    const data = await request.post('/audio/extract', {
+      storyboard_id: sb.id, text: sb.dialogue, tts_kind: 'dialogue',
     })
-    const data = await res.json()
-    const businessOk = data.success === true || Number(data.code) === 200
-    if (!res.ok || !businessOk) {
-      throw new Error(data.error?.message || data.message || '配音失败')
-    }
-    if (data.data?.local_path) {
-      sbDialogueAudioPaths.value = { ...sbDialogueAudioPaths.value, [sb.id]: data.data.local_path }
-      sb.audio_local_path = data.data.local_path
+    if (data?.local_path) {
+      sbDialogueAudioPaths.value = { ...sbDialogueAudioPaths.value, [sb.id]: data.local_path }
+      sb.audio_local_path = data.local_path
       ElMessage.success('配音已生成')
     }
   } catch (e) {
@@ -4127,19 +4120,12 @@ async function onTtsSbNarration(sb) {
   }
   ttsSbNarrationIds.add(sb.id)
   try {
-    const res = await fetch('/api/v1/audio/extract', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ storyboard_id: sb.id, text, tts_kind: 'narration' }),
+    const data = await request.post('/audio/extract', {
+      storyboard_id: sb.id, text, tts_kind: 'narration',
     })
-    const data = await res.json()
-    const businessOk = data.success === true || Number(data.code) === 200
-    if (!res.ok || !businessOk) {
-      throw new Error(data.error?.message || data.message || '解说配音失败')
-    }
-    if (data.data?.local_path) {
-      sbNarrationAudioPaths.value = { ...sbNarrationAudioPaths.value, [sb.id]: data.data.local_path }
-      sb.narration_audio_local_path = data.data.local_path
+    if (data?.local_path) {
+      sbNarrationAudioPaths.value = { ...sbNarrationAudioPaths.value, [sb.id]: data.local_path }
+      sb.narration_audio_local_path = data.local_path
       ElMessage.success('解说配音已生成')
     }
   } catch (e) {
