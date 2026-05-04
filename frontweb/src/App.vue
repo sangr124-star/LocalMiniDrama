@@ -1,10 +1,12 @@
 <template>
   <div class="app">
     <router-view />
+    <InsufficientCreditsModal />
   </div>
 </template>
 
 <script setup lang="ts">
+import InsufficientCreditsModal from '@/components/InsufficientCreditsModal.vue'
 </script>
 
 <style>

@@ -1,8 +1,14 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { ref } from 'vue'
 
 const TOKEN_KEY = 'minidrama_token'
 const USER_KEY = 'minidrama_user'
+
+// 全局事件：积分相关（让顶部 badge 监听刷新；让全局组件监听 402 弹窗）
+export const insufficientCreditsPayload = ref(null)
+export const creditsChangedTick = ref(0)
+export function notifyCreditsChanged() { creditsChangedTick.value++ }
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY) || ''
@@ -55,6 +61,11 @@ request.interceptors.response.use(
         const from = window.location.pathname + window.location.search
         window.location.href = `/login?redirect=${encodeURIComponent(from)}`
       }
+    }
+    // 402 INSUFFICIENT_CREDITS：通过全局 ref 触发弹窗，不走通用 ElMessage 错误提示
+    if (status === 402 && error.response?.data?.error?.code === 'INSUFFICIENT_CREDITS') {
+      insufficientCreditsPayload.value = error.response.data.error
+      return Promise.reject(error)
     }
     // 提取后端实际错误信息（优先 API 返回的 message，而非 axios 通用 "status code 500"）
     const backendMsg = error.response?.data?.error?.message
