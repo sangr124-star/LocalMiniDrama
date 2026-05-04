@@ -19,7 +19,14 @@ const { estimateImage, settleImage } = require('./creditPricing');
  * - 真实张数从 result.image_url（单张）或 result.images[]（多张）推断
  */
 async function _billedImageCall(db, log, opts, doCall) {
-  const userId = opts && opts.user_id;
+  // 优先 opts.user_id；没有则尝试通过 drama_id 反查
+  let userId = opts && opts.user_id;
+  if (!userId && opts && opts.drama_id) {
+    try {
+      const drow = db.prepare('SELECT user_id FROM dramas WHERE id=?').get(Number(opts.drama_id));
+      if (drow && drow.user_id) userId = drow.user_id;
+    } catch (_) {}
+  }
   if (!userId) {
     if (log) log.warn('[credits] image.gen called without user_id, skipping billing', { model: opts?.model });
     return doCall();

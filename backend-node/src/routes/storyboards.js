@@ -448,7 +448,7 @@ function routes(db, log) {
 
         const polishedPrompt = await aiClient.generateText(
           db, log, 'text', userPromptLines.join('\n'), promptI18n.getImagePolishPrompt(),
-          { scene_key: 'image_polish', max_tokens: 300, temperature: 0.3 }
+          { scene_key: 'image_polish', max_tokens: 300, temperature: 0.3, user_id: req.user?.id }
         );
 
         if (!polishedPrompt || polishedPrompt.trim().length < 10) {
@@ -466,7 +466,7 @@ function routes(db, log) {
         const snapshotPrompt = promptI18n.getContinuitySnapshotPrompt();
         const snapshotUserPrompt = [`PROMPT: ${polished}`, `ASSETS: ${assetNames || 'none'}`].join('\n');
         aiClient.generateText(db, log, 'text', snapshotUserPrompt, snapshotPrompt, {
-          scene_key: 'image_polish', max_tokens: 200, temperature: 0.1,
+          scene_key: 'image_polish', max_tokens: 200, temperature: 0.1, user_id: req.user?.id,
         }).then((snapshotJson) => {
           if (!snapshotJson?.trim()) return;
           const cleaned = snapshotJson.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -502,7 +502,7 @@ function routes(db, log) {
           'text',
           userPrompt,
           promptI18n.getUniversalOmniSegmentPrompt(),
-          { scene_key: 'image_polish', max_tokens: 2400, temperature: 0.28 }
+          { scene_key: 'image_polish', max_tokens: 2400, temperature: 0.28, user_id: req.user?.id }
         );
         if (!out || String(out).trim().length < 20) {
           return response.badRequest(res, 'AI 返回内容过短，请检查文本模型配置');
@@ -557,6 +557,7 @@ function routes(db, log) {
             max_tokens: 2400,
             temperature: 0.28,
             silence_timeout_ms: 180000,
+            user_id: req.user?.id,
           },
           (delta) => writeNd({ type: 'delta', text: delta })
         );
@@ -679,6 +680,7 @@ function routes(db, log) {
             max_tokens: 4096,
             temperature: 0.52,
             silence_timeout_ms: 180000,
+            user_id: req.user?.id,
           },
           (delta) => writeNd({ type: 'delta', text: delta })
         );
@@ -936,6 +938,7 @@ function routes(db, log) {
             max_tokens: 3600,
             temperature: 0.28,
             silence_timeout_ms: 180000,
+            user_id: req.user?.id,
           },
           (delta) => writeNd({ type: 'delta', text: delta })
         );

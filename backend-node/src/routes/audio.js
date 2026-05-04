@@ -40,6 +40,7 @@ function routes(db, log, cfg) {
           text: ttsText,
           storyboard_id: storyboard_id || null,
           storage_base: getStoragePath(),
+          user_id: req.user?.id,
         });
         if (storyboard_id && result.local_path) {
           const now = new Date().toISOString();
@@ -82,6 +83,7 @@ function routes(db, log, cfg) {
             text: row.dialogue,
             storyboard_id: row.id,
             storage_base: storagePath,
+            user_id: req.user?.id,
           });
           if (result.local_path) {
             const now = new Date().toISOString();

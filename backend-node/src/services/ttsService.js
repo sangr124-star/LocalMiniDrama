@@ -212,15 +212,26 @@ async function synthesize(db, log, opts) {
   // 计费：reserve；失败 refund，成功按 estimated 全额结算（TTS 无真实字符数返回）
   const creditService = require('./creditService');
   const { estimateTts } = require('./creditPricing');
+  // 优先 opts.user_id；没有则通过 storyboard_id 反查 drama → dramas.user_id
+  let billUserId = user_id;
+  if (!billUserId && storyboard_id) {
+    try {
+      const sbrow = db.prepare('SELECT drama_id FROM storyboards WHERE id=?').get(Number(storyboard_id));
+      if (sbrow && sbrow.drama_id) {
+        const drow = db.prepare('SELECT user_id FROM dramas WHERE id=?').get(Number(sbrow.drama_id));
+        if (drow && drow.user_id) billUserId = drow.user_id;
+      }
+    } catch (_) {}
+  }
   let creditLedgerId = null;
-  if (user_id) {
+  if (billUserId) {
     const est = estimateTts(db, { model: ttsModel, text });
-    creditLedgerId = creditService.reserve(db, user_id, est.estimated, 'tts.synth', {
+    creditLedgerId = creditService.reserve(db, billUserId, est.estimated, 'tts.synth', {
       service_type: 'tts',
       model: ttsModel,
       price_snapshot: est.snapshot,
     });
-    if (log) log.info('credits reserve', { scope: 'tts.synth', user_id, estimated: est.estimated, ledger_id: creditLedgerId });
+    if (log) log.info('credits reserve', { scope: 'tts.synth', user_id: billUserId, estimated: est.estimated, ledger_id: creditLedgerId });
   } else if (log) {
     log.warn('[credits] tts.synth called without user_id, skipping billing', { model: ttsModel });
   }
