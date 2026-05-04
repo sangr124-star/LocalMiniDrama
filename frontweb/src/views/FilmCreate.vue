@@ -1192,13 +1192,13 @@
                 />
                 <span v-if="generatingSbVideoIds.has(sb.id)" class="sb-video-regenerating-overlay">
                   <el-icon class="is-loading"><Loading /></el-icon>
-                  正在重新生成...
+                  正在重新生成<span v-if="sbVideoElapsedText(sb.id)">（已 {{ sbVideoElapsedText(sb.id) }}）</span>...
                 </span>
               </div>
               <div v-else class="sb-video-area sb-video-placeholder">
                 <span v-if="generatingSbVideoIds.has(sb.id)" class="sb-video-generating-text">
                   <el-icon class="is-loading"><Loading /></el-icon>
-                  正在生成视频...
+                  正在生成视频<span v-if="sbVideoElapsedText(sb.id)">（已 {{ sbVideoElapsedText(sb.id) }}）</span>...
                 </span>
                 <template v-else>
                   <div v-if="getSbVideoError(sb.id)" class="sb-video-error">
@@ -2556,6 +2556,30 @@ const sbVideos = ref({})
 const sbVideoErrors = ref({})
 const generatingSbImageIds = reactive(new Set())
 const generatingSbVideoIds = reactive(new Set())
+// 视频生成开始时间戳（毫秒），key: sb.id；用于显示已耗时
+const sbVideoGenStartAt = reactive(new Map())
+// 每秒滴答，让"已耗时 XX秒"显示能实时刷新
+const _nowTick = ref(Date.now())
+let _nowTickTimer = null
+function _ensureNowTick() {
+  if (_nowTickTimer) return
+  _nowTickTimer = setInterval(() => { _nowTick.value = Date.now() }, 1000)
+}
+function _stopNowTickIfIdle() {
+  if (sbVideoGenStartAt.size === 0 && _nowTickTimer) {
+    clearInterval(_nowTickTimer)
+    _nowTickTimer = null
+  }
+}
+function sbVideoElapsedText(sbId) {
+  const startAt = sbVideoGenStartAt.get(sbId)
+  if (!startAt) return ''
+  void _nowTick.value // 触发响应式
+  const sec = Math.max(0, Math.floor((Date.now() - startAt) / 1000))
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return m > 0 ? `${m}分${s}秒` : `${s}秒`
+}
 const generatingUniversalSegmentIds = reactive(new Set())
 /** 经典分镜：流式润色 video_prompt 进行中 */
 const classicVideoPolishIds = reactive(new Set())
@@ -3077,9 +3101,24 @@ async function loadSingleStoryboardMedia(sbId) {
       ...sbImages.value,
       [sbId]: (imgRes && imgRes.items) ? imgRes.items : []
     }
+    const vids = (vidRes && vidRes.items) ? vidRes.items : []
     sbVideos.value = {
       ...sbVideos.value,
-      [sbId]: (vidRes && vidRes.items) ? vidRes.items : []
+      [sbId]: vids
+    }
+    // 后端有 pending/processing 任务但前端 generating set 没标记（如刷新页面后），同步标记并显示已耗时
+    const inFlight = vids.find((v) => v && (v.status === 'pending' || v.status === 'processing'))
+    if (inFlight) {
+      if (!generatingSbVideoIds.has(sbId)) generatingSbVideoIds.add(sbId)
+      if (!sbVideoGenStartAt.has(sbId)) {
+        const startMs = inFlight.created_at ? Date.parse(inFlight.created_at) : Date.now()
+        sbVideoGenStartAt.set(sbId, Number.isFinite(startMs) ? startMs : Date.now())
+      }
+      _ensureNowTick()
+    } else if (sbVideoGenStartAt.has(sbId) && !generatingSbVideoIds.has(sbId)) {
+      // 后端已无在跑任务但 startAt 残留：清掉
+      sbVideoGenStartAt.delete(sbId)
+      _stopNowTickIfIdle()
     }
     restoreSelectionsFromBackend()
   } catch (_) {
@@ -4846,6 +4885,8 @@ async function onGenerateSbVideo(sb) {
     }
   }
   generatingSbVideoIds.add(sb.id)
+  sbVideoGenStartAt.set(sb.id, Date.now())
+  _ensureNowTick()
   sbVideoErrors.value[sb.id] = ''
   // 清除前端选中状态 + 清除后端手动指定的 video_url，让合成时自动取最新生成的视频
   if (sbSelectedVideoId.value[sb.id] != null) {
@@ -4893,6 +4934,8 @@ async function onGenerateSbVideo(sb) {
     ElMessage.error(e.message || '提交失败')
   } finally {
     generatingSbVideoIds.delete(sb.id)
+    sbVideoGenStartAt.delete(sb.id)
+    _stopNowTickIfIdle()
     await loadSingleStoryboardMedia(sb.id)
   }
 }
@@ -5780,6 +5823,8 @@ async function runOneClickPipeline(textOnly = false) {
       const { paused } = await runConcurrently(boards2, concurrency, async (sb) => {
         await checkPause()
         generatingSbVideoIds.add(sb.id)
+        sbVideoGenStartAt.set(sb.id, Date.now())
+        _ensureNowTick()
         try {
           const stepName = '分镜视频 #' + (sb.storyboard_number ?? sb.id)
           const ok = await pipelineWithRetry(stepName, async () => {
@@ -5810,6 +5855,8 @@ async function runOneClickPipeline(textOnly = false) {
           if (ok && typeof ok === 'object' && ok.paused) return { paused: true }
         } finally {
           generatingSbVideoIds.delete(sb.id)
+          sbVideoGenStartAt.delete(sb.id)
+          _stopNowTickIfIdle()
         }
       }, { getLabel: (sb) => '分镜视频 #' + (sb.storyboard_number ?? sb.id) })
       if (paused) { await waitForResume() }
