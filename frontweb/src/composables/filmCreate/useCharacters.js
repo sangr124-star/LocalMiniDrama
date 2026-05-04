@@ -5,6 +5,7 @@ import { characterLibraryAPI } from '@/api/characterLibrary'
 import { dramaAPI } from '@/api/drama'
 import { generationAPI } from '@/api/generation'
 import { uploadAPI } from '@/api/upload'
+import { useElapsedTimer } from '@/composables/useElapsedTimer'
 
 /**
  * 角色管理 Composable
@@ -45,6 +46,8 @@ export function useCharacters(deps) {
   // ── 角色生成状态 ──────────────────────────────────────
   const charactersGenerating = ref(false)
   const generatingCharIds = reactive(new Set())
+  const charImageTimer = useElapsedTimer()
+  function charImageElapsedText(id) { return charImageTimer.text(id) }
 
   // ── 角色库状态 ────────────────────────────────────────
   const showCharLibrary = ref(false)
@@ -297,6 +300,7 @@ export function useCharacters(deps) {
     char.errorMsg = ''
     char.error_msg = ''
     generatingCharIds.add(char.id)
+    charImageTimer.start(char.id)
     try {
       const res = await characterAPI.generateImage(char.id, undefined, getSelectedStyle())
       const taskId = res?.image_generation?.task_id ?? res?.task_id
@@ -322,6 +326,7 @@ export function useCharacters(deps) {
       ElMessage.error(e.message || '提交失败')
     } finally {
       generatingCharIds.delete(char.id)
+      charImageTimer.stop(char.id)
     }
   }
 
@@ -577,6 +582,8 @@ export function useCharacters(deps) {
     // 生成状态
     charactersGenerating,
     generatingCharIds,
+    charImageTimer,
+    charImageElapsedText,
     // 库状态
     showCharLibrary,
     charLibraryList,

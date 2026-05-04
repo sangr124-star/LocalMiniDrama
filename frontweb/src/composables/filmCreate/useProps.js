@@ -3,6 +3,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { propAPI } from '@/api/props'
 import { propLibraryAPI } from '@/api/propLibrary'
 import { uploadAPI } from '@/api/upload'
+import { useElapsedTimer } from '@/composables/useElapsedTimer'
 
 /**
  * 道具管理 Composable
@@ -51,6 +52,8 @@ export function useProps(deps) {
   // ── 道具生成状态 ──────────────────────────────────────
   const propsExtracting = ref(false)
   const generatingPropIds = reactive(new Set())
+  const propImageTimer = useElapsedTimer()
+  function propImageElapsedText(id) { return propImageTimer.text(id) }
 
   // ── 道具库状态 ────────────────────────────────────────
   const showPropLibrary = ref(false)
@@ -266,6 +269,7 @@ export function useProps(deps) {
     prop.errorMsg = ''
     prop.error_msg = ''
     generatingPropIds.add(prop.id)
+    propImageTimer.start(prop.id)
     try {
       const res = await propAPI.generateImage(prop.id, undefined, getSelectedStyle())
       const taskId = res?.task_id
@@ -291,6 +295,7 @@ export function useProps(deps) {
       ElMessage.error(e.message || '提交失败')
     } finally {
       generatingPropIds.delete(prop.id)
+      propImageTimer.stop(prop.id)
     }
   }
 
@@ -472,6 +477,8 @@ export function useProps(deps) {
     // 生成状态
     propsExtracting,
     generatingPropIds,
+    propImageTimer,
+    propImageElapsedText,
     // 库状态
     showPropLibrary,
     propLibraryList,

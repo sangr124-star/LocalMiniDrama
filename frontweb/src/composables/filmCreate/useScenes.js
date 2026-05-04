@@ -3,6 +3,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { sceneAPI } from '@/api/scenes'
 import { sceneLibraryAPI } from '@/api/sceneLibrary'
 import { uploadAPI } from '@/api/upload'
+import { useElapsedTimer } from '@/composables/useElapsedTimer'
 
 /**
  * 场景管理 Composable
@@ -44,6 +45,8 @@ export function useScenes(deps) {
   // ── 场景生成状态 ──────────────────────────────────────
   const scenesExtracting = ref(false)
   const generatingSceneIds = reactive(new Set())
+  const sceneImageTimer = useElapsedTimer()
+  function sceneImageElapsedText(id) { return sceneImageTimer.text(id) }
 
   // ── 场景库状态 ────────────────────────────────────────
   const showSceneLibrary = ref(false)
@@ -261,6 +264,7 @@ export function useScenes(deps) {
     scene.errorMsg = ''
     scene.error_msg = ''
     generatingSceneIds.add(scene.id)
+    sceneImageTimer.start(scene.id)
     try {
       const res = await sceneAPI.generateImage({
         scene_id: scene.id,
@@ -290,6 +294,7 @@ export function useScenes(deps) {
       ElMessage.error(e.message || '提交失败')
     } finally {
       generatingSceneIds.delete(scene.id)
+      sceneImageTimer.stop(scene.id)
     }
   }
 
@@ -446,6 +451,8 @@ export function useScenes(deps) {
     // 生成状态
     scenesExtracting,
     generatingSceneIds,
+    sceneImageTimer,
+    sceneImageElapsedText,
     // 库状态
     showSceneLibrary,
     sceneLibraryList,

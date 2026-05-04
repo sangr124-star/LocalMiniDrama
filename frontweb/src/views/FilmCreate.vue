@@ -496,7 +496,8 @@
                     <div class="asset-cover-actions">
                       <el-button type="primary" size="small" :loading="generatingCharIds.has(char.id)" @click="onGenerateCharacterImage(char)">
                         <el-icon v-if="!generatingCharIds.has(char.id)"><MagicStick /></el-icon>
-                        AI 生成
+                        <template v-if="generatingCharIds.has(char.id) && charImageElapsedText(char.id)">生成中（已 {{ charImageElapsedText(char.id) }}）</template>
+                        <template v-else>AI 生成</template>
                       </el-button>
                       <el-button type="success" size="small" :loading="uploadingResourceId === 'char-' + char.id" @click="onUploadResourceClick('character', char.id)">
                         <el-icon v-if="uploadingResourceId !== 'char-' + char.id"><Upload /></el-icon>
@@ -567,7 +568,8 @@
                     <div class="asset-cover-actions">
                       <el-button type="primary" size="small" :loading="generatingPropIds.has(prop.id)" @click="onGeneratePropImage(prop)">
                         <el-icon v-if="!generatingPropIds.has(prop.id)"><MagicStick /></el-icon>
-                        AI 生成
+                        <template v-if="generatingPropIds.has(prop.id) && propImageElapsedText(prop.id)">生成中（已 {{ propImageElapsedText(prop.id) }}）</template>
+                        <template v-else>AI 生成</template>
                       </el-button>
                       <el-button type="success" size="small" :loading="uploadingResourceId === 'prop-' + prop.id" @click="onUploadResourceClick('prop', prop.id)">
                         <el-icon v-if="uploadingResourceId !== 'prop-' + prop.id"><Upload /></el-icon>
@@ -662,7 +664,8 @@
                       <el-tooltip content="多角度图一张（正/侧/俯/仰）" placement="top">
                         <el-button type="primary" size="small" :loading="generatingSceneIds.has(scene.id)" @click="onGenerateSceneImage(scene)">
                           <el-icon v-if="!generatingSceneIds.has(scene.id)"><MagicStick /></el-icon>
-                          AI 生成
+                          <template v-if="generatingSceneIds.has(scene.id) && sceneImageElapsedText(scene.id)">生成中（已 {{ sceneImageElapsedText(scene.id) }}）</template>
+                          <template v-else>AI 生成</template>
                         </el-button>
                       </el-tooltip>
                       <el-button type="success" size="small" :loading="uploadingResourceId === 'scene-' + scene.id" @click="onUploadResourceClick('scene', scene.id)">
@@ -1128,8 +1131,9 @@
                   </template>
                   <template v-else>
                     <el-button type="primary" size="small" class="sb-gen-btn" :loading="generatingSbImageIds.has(sb.id)" @click="onGenerateSbImage(sb)">
-                      <el-icon><MagicStick /></el-icon>
-                      生成分镜参考图
+                      <el-icon v-if="!generatingSbImageIds.has(sb.id)"><MagicStick /></el-icon>
+                      <template v-if="generatingSbImageIds.has(sb.id) && sbImageElapsedText(sb.id)">生成中（已 {{ sbImageElapsedText(sb.id) }}）</template>
+                      <template v-else>生成分镜参考图</template>
                     </el-button>
                     <el-button size="small" :loading="uploadingSbImageId === sb.id" @click="onUploadSbImageClick(sb)">上传</el-button>
                   </template>
@@ -2154,6 +2158,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Setting, Plus, Minus, Sunny, Moon, MagicStick, Upload, Delete, Check, Loading, WarningFilled, User, Box, Picture, Film, VideoCamera, Document, InfoFilled, Refresh, ZoomIn, QuestionFilled, DocumentAdd, Expand, Fold, VideoPlay } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
+import { useElapsedTimer } from '@/composables/useElapsedTimer'
 import { useFilmStore } from '@/stores/film'
 import { dramaAPI } from '@/api/drama'
 import { generationAPI } from '@/api/generation'
@@ -2368,6 +2373,7 @@ const {
   loadCharLibraryList, debouncedLoadCharLibrary, openEditCharLibrary, submitEditCharLibrary,
   onDeleteCharLibrary, onAddCharacterToLibrary, onAddCharacterToMaterialLibrary, onSd2CertifyCharacter,
   onSd2CertifyRefresh, openCharSd2CertDialog, onAddCharFromLibrary,
+  charImageElapsedText,
 } = useCharacters({ store, dramaId, currentEpisodeId, getSelectedStyle, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage })
 
 // ── Composable: Props ──────────────────────────────────
@@ -2386,6 +2392,7 @@ const {
   loadPropLibraryList, debouncedLoadPropLibrary, openEditPropLibrary, submitEditPropLibrary,
   onDeletePropLibrary, onAddPropToLibrary, onAddPropToMaterialLibrary, onAddPropFromLibrary,
   doExtractFromRef2,
+  propImageElapsedText,
 } = usePropsComposable({ store, dramaId, currentEpisodeId, getSelectedStyle, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage })
 
 // ── Composable: Scenes ─────────────────────────────────
@@ -2402,6 +2409,7 @@ const {
   onCloseSceneDialog, onDeleteScene, onGenerateSceneImage,
   loadSceneLibraryList, debouncedLoadSceneLibrary, openEditSceneLibrary, submitEditSceneLibrary,
   onDeleteSceneLibrary, onAddSceneToLibrary, onAddSceneToMaterialLibrary, onAddSceneFromLibrary,
+  sceneImageElapsedText,
 } = useScenes({ store, dramaId, currentEpisodeId, getSelectedStyle, scriptLanguage, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage, dramaAPI })
 
 
@@ -2556,30 +2564,12 @@ const sbVideos = ref({})
 const sbVideoErrors = ref({})
 const generatingSbImageIds = reactive(new Set())
 const generatingSbVideoIds = reactive(new Set())
-// 视频生成开始时间戳（毫秒），key: sb.id；用于显示已耗时
-const sbVideoGenStartAt = reactive(new Map())
-// 每秒滴答，让"已耗时 XX秒"显示能实时刷新
-const _nowTick = ref(Date.now())
-let _nowTickTimer = null
-function _ensureNowTick() {
-  if (_nowTickTimer) return
-  _nowTickTimer = setInterval(() => { _nowTick.value = Date.now() }, 1000)
-}
-function _stopNowTickIfIdle() {
-  if (sbVideoGenStartAt.size === 0 && _nowTickTimer) {
-    clearInterval(_nowTickTimer)
-    _nowTickTimer = null
-  }
-}
-function sbVideoElapsedText(sbId) {
-  const startAt = sbVideoGenStartAt.get(sbId)
-  if (!startAt) return ''
-  void _nowTick.value // 触发响应式
-  const sec = Math.max(0, Math.floor((Date.now() - startAt) / 1000))
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return m > 0 ? `${m}分${s}秒` : `${s}秒`
-}
+// 通用耗时计时器（FilmCreate 自己管 sbImage / sbVideo；
+// charImage/sceneImage/propImage 由对应 composable 持有 timer 并暴露 elapsedText）
+const sbVideoTimer = useElapsedTimer()
+const sbImageTimer = useElapsedTimer()
+function sbVideoElapsedText(sbId) { return sbVideoTimer.text(sbId) }
+function sbImageElapsedText(sbId) { return sbImageTimer.text(sbId) }
 const generatingUniversalSegmentIds = reactive(new Set())
 /** 经典分镜：流式润色 video_prompt 进行中 */
 const classicVideoPolishIds = reactive(new Set())
@@ -3097,9 +3087,18 @@ async function loadSingleStoryboardMedia(sbId) {
       imagesAPI.list({ storyboard_id: sbId, page: 1, page_size: 100 }),
       videosAPI.list({ storyboard_id: sbId, page: 1, page_size: 50 })
     ])
-    sbImages.value = {
-      ...sbImages.value,
-      [sbId]: (imgRes && imgRes.items) ? imgRes.items : []
+    const imgs = (imgRes && imgRes.items) ? imgRes.items : []
+    sbImages.value = { ...sbImages.value, [sbId]: imgs }
+    // 同步图片在跑任务的计时
+    const imgInFlight = imgs.find((x) => x && (x.status === 'pending' || x.status === 'processing'))
+    if (imgInFlight) {
+      if (!generatingSbImageIds.has(sbId)) generatingSbImageIds.add(sbId)
+      if (!sbImageTimer.has(sbId)) {
+        const startMs = imgInFlight.created_at ? Date.parse(imgInFlight.created_at) : Date.now()
+        sbImageTimer.startAt(sbId, Number.isFinite(startMs) ? startMs : Date.now())
+      }
+    } else if (sbImageTimer.has(sbId) && !generatingSbImageIds.has(sbId)) {
+      sbImageTimer.stop(sbId)
     }
     const vids = (vidRes && vidRes.items) ? vidRes.items : []
     sbVideos.value = {
@@ -3110,15 +3109,12 @@ async function loadSingleStoryboardMedia(sbId) {
     const inFlight = vids.find((v) => v && (v.status === 'pending' || v.status === 'processing'))
     if (inFlight) {
       if (!generatingSbVideoIds.has(sbId)) generatingSbVideoIds.add(sbId)
-      if (!sbVideoGenStartAt.has(sbId)) {
+      if (!sbVideoTimer.has(sbId)) {
         const startMs = inFlight.created_at ? Date.parse(inFlight.created_at) : Date.now()
-        sbVideoGenStartAt.set(sbId, Number.isFinite(startMs) ? startMs : Date.now())
+        sbVideoTimer.startAt(sbId, Number.isFinite(startMs) ? startMs : Date.now())
       }
-      _ensureNowTick()
-    } else if (sbVideoGenStartAt.has(sbId) && !generatingSbVideoIds.has(sbId)) {
-      // 后端已无在跑任务但 startAt 残留：清掉
-      sbVideoGenStartAt.delete(sbId)
-      _stopNowTickIfIdle()
+    } else if (sbVideoTimer.has(sbId) && !generatingSbVideoIds.has(sbId)) {
+      sbVideoTimer.stop(sbId)
     }
     restoreSelectionsFromBackend()
   } catch (_) {
@@ -3201,6 +3197,7 @@ async function onGenerateSbImage(sb) {
   sb.errorMsg = ''
   sb.error_msg = ''
   generatingSbImageIds.add(sb.id)
+  sbImageTimer.start(sb.id)
   try {
     // 仅当本页已同步过该分镜的角色勾选状态时落库（避免用「空数组」误清空未初始化的分镜）
     const localCharIds = sbCharacterIds.value[sb.id]
@@ -3239,6 +3236,7 @@ async function onGenerateSbImage(sb) {
     ElMessage.error(e.message || '生成失败')
   } finally {
     generatingSbImageIds.delete(sb.id)
+    sbImageTimer.stop(sb.id)
   }
 }
 
@@ -4885,8 +4883,7 @@ async function onGenerateSbVideo(sb) {
     }
   }
   generatingSbVideoIds.add(sb.id)
-  sbVideoGenStartAt.set(sb.id, Date.now())
-  _ensureNowTick()
+  sbVideoTimer.start(sb.id)
   sbVideoErrors.value[sb.id] = ''
   // 清除前端选中状态 + 清除后端手动指定的 video_url，让合成时自动取最新生成的视频
   if (sbSelectedVideoId.value[sb.id] != null) {
@@ -4934,8 +4931,7 @@ async function onGenerateSbVideo(sb) {
     ElMessage.error(e.message || '提交失败')
   } finally {
     generatingSbVideoIds.delete(sb.id)
-    sbVideoGenStartAt.delete(sb.id)
-    _stopNowTickIfIdle()
+    sbVideoTimer.stop(sb.id)
     await loadSingleStoryboardMedia(sb.id)
   }
 }
@@ -5771,6 +5767,7 @@ async function runOneClickPipeline(textOnly = false) {
       const { paused } = await runConcurrently(boardsWithoutImg, concurrency, async (sb) => {
         await checkPause()
         generatingSbImageIds.add(sb.id)
+  sbImageTimer.start(sb.id)
         try {
           const stepName = '分镜图 #' + (sb.storyboard_number ?? sb.id)
           const ok = await pipelineWithRetry(stepName, async () => {
@@ -5791,6 +5788,7 @@ async function runOneClickPipeline(textOnly = false) {
           if (ok && typeof ok === 'object' && ok.paused) return { paused: true }
         } finally {
           generatingSbImageIds.delete(sb.id)
+          sbImageTimer.stop(sb.id)
         }
       }, { getLabel: (sb) => '分镜图 #' + (sb.storyboard_number ?? sb.id) })
       if (paused) { await waitForResume() }
@@ -5823,8 +5821,7 @@ async function runOneClickPipeline(textOnly = false) {
       const { paused } = await runConcurrently(boards2, concurrency, async (sb) => {
         await checkPause()
         generatingSbVideoIds.add(sb.id)
-        sbVideoGenStartAt.set(sb.id, Date.now())
-        _ensureNowTick()
+        sbVideoTimer.start(sb.id)
         try {
           const stepName = '分镜视频 #' + (sb.storyboard_number ?? sb.id)
           const ok = await pipelineWithRetry(stepName, async () => {
@@ -5855,8 +5852,7 @@ async function runOneClickPipeline(textOnly = false) {
           if (ok && typeof ok === 'object' && ok.paused) return { paused: true }
         } finally {
           generatingSbVideoIds.delete(sb.id)
-          sbVideoGenStartAt.delete(sb.id)
-          _stopNowTickIfIdle()
+          sbVideoTimer.stop(sb.id)
         }
       }, { getLabel: (sb) => '分镜视频 #' + (sb.storyboard_number ?? sb.id) })
       if (paused) { await waitForResume() }
