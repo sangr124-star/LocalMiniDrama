@@ -44,6 +44,10 @@
           <el-button type="primary" class="btn-new" @click="goNewProject">
             <el-icon><Plus /></el-icon>新建项目
           </el-button>
+          <CreditBalanceBadge v-if="currentUser" />
+          <el-button v-if="isSuperAdmin" class="btn-theme" title="积分管理" @click="$router.push('/admin/credits')">
+            <el-icon><Coin /></el-icon>积分
+          </el-button>
           <el-button v-if="currentUser" class="btn-theme" :title="`点击修改密码 - ${currentUser.username}`" @click="onChangePassword">
             <el-icon><User /></el-icon>{{ roleLabel(currentUser) }}
           </el-button>
@@ -367,7 +371,8 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete, Setting, Plus, User, PictureFilled, Box, Sunny, Moon, ChatDotSquare, Download, Upload, QuestionFilled, FolderOpened, MagicStick, Files, SwitchButton } from '@element-plus/icons-vue'
+import { Edit, Delete, Setting, Plus, User, PictureFilled, Box, Sunny, Moon, ChatDotSquare, Download, Upload, QuestionFilled, FolderOpened, MagicStick, Files, SwitchButton, Coin } from '@element-plus/icons-vue'
+import CreditBalanceBadge from '@/components/CreditBalanceBadge.vue'
 import { useTheme } from '@/composables/useTheme'
 import { dramaAPI } from '@/api/drama'
 import { characterLibraryAPI } from '@/api/characterLibrary'

@@ -51,6 +51,18 @@ const router = createRouter({
       name: 'media-library',
       component: () => import('@/views/MediaLibrary.vue'),
       meta: { title: '媒体素材库' }
+    },
+    {
+      path: '/my/credits',
+      name: 'my-credits',
+      component: () => import('@/views/MyCredits.vue'),
+      meta: { title: '我的积分' }
+    },
+    {
+      path: '/admin/credits',
+      name: 'admin-credits',
+      component: () => import('@/views/AdminCredits.vue'),
+      meta: { title: '积分管理', requireSuperAdmin: true }
     }
   ]
 })
