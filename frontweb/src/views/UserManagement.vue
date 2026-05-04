@@ -24,12 +24,21 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="200" />
-      <el-table-column label="操作" min-width="280">
+      <el-table-column label="积分余额" width="120">
+        <template #default="{ row }">
+          <span style="font-weight: 600; color: #409eff;">💎 {{ row.credit_balance ?? 0 }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="created_at" label="创建时间" width="180">
+        <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+      </el-table-column>
+      <el-table-column label="操作" min-width="380">
         <template #default="{ row }">
           <template v-if="canActOn(row)">
             <el-button size="small" @click="openEdit(row)">编辑</el-button>
             <el-button size="small" @click="openReset(row)">重置密码</el-button>
+            <el-button size="small" type="success" @click="openGrant(row)">充值</el-button>
+            <el-button v-if="isSuperAdmin" size="small" type="danger" @click="openDeduct(row)">扣减</el-button>
             <el-button v-if="row.username !== 'admin'" size="small" type="warning" @click="toggleStatus(row)">
               {{ row.status === 'active' ? '禁用' : '启用' }}
             </el-button>
@@ -39,6 +48,8 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <GrantCreditsDialog ref="grantDialogRef" @updated="loadUsers" />
 
     <!-- 新建/编辑 -->
     <el-dialog v-model="formVisible" :title="editingId ? '编辑用户' : '新建用户'" width="460px">
@@ -91,6 +102,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { adminAPI } from '@/api/auth'
 import { getUser } from '@/utils/request'
+import GrantCreditsDialog from '@/components/GrantCreditsDialog.vue'
 
 const router = useRouter()
 const loading = ref(false)
@@ -201,6 +213,11 @@ async function toggleStatus(row) {
     await loadUsers()
   } catch (_) {}
 }
+
+const grantDialogRef = ref(null)
+function openGrant(row) { grantDialogRef.value?.open(row, 'grant') }
+function openDeduct(row) { grantDialogRef.value?.open(row, 'deduct') }
+function formatTime(s) { return s ? s.slice(0, 19).replace('T', ' ') : '' }
 
 async function onDelete(row) {
   try {
