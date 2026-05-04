@@ -259,11 +259,49 @@ async function runMergedEpisodePostProcess(db, log, opts) {
         if (wantDial) {
           const rel = row?.audio_local_path && String(row.audio_local_path).trim();
           const srcAbs = rel ? path.join(storageRoot, rel.replace(/\//g, path.sep)) : null;
+          const dialText = (row?.dialogue && String(row.dialogue).trim()) ? String(row.dialogue).trim() : '';
           if (srcAbs && fs.existsSync(srcAbs)) {
+            // 已经预生成过 TTS：直接对齐使用
             if (!fitAudioToSlot(srcAbs, slotSec, diaFit, log)) {
               return { ok: false, error: `对白配音时长对齐失败 #${i}` };
             }
+          } else if (dialText) {
+            // 未预生成但有对白文本：自动调 TTS（与旁白行为一致）
+            const segRaw = path.join(tempRoot, `dia_raw_${i}.mp3`);
+            let synth;
+            try {
+              synth = await ttsService.synthesize(db, log, {
+                text: dialText,
+                storyboard_id: sbId,
+                storage_base: storageRoot,
+              });
+            } catch (e) {
+              log.warn('merged post: dialogue TTS failed', { segment: i, sb_id: sbId, error: e.message });
+              if (!writeSilenceMp3(slotSec, diaFit, log)) {
+                return { ok: false, error: `对白静音片段失败 #${i}` };
+              }
+            }
+            if (synth?.local_path) {
+              const diaAbs = path.join(storageRoot, synth.local_path.replace(/\//g, path.sep));
+              if (!fs.existsSync(diaAbs)) {
+                if (!writeSilenceMp3(slotSec, diaFit, log)) {
+                  return { ok: false, error: `对白 TTS 文件不存在且静音失败 #${i}` };
+                }
+              } else {
+                try { fs.copyFileSync(diaAbs, segRaw); }
+                catch (_) { return { ok: false, error: `复制对白 TTS 失败 #${i}` }; }
+                // 顺带回写 storyboards.audio_local_path，下次合成无需重新生成
+                try {
+                  db.prepare('UPDATE storyboards SET audio_local_path = ?, updated_at = ? WHERE id = ?')
+                    .run(synth.local_path, new Date().toISOString(), sbId);
+                } catch (_) {}
+                if (!fitAudioToSlot(segRaw, slotSec, diaFit, log)) {
+                  return { ok: false, error: `对白时长对齐失败 #${i}` };
+                }
+              }
+            }
           } else if (!writeSilenceMp3(slotSec, diaFit, log)) {
+            // 没预生成 + 没对白文本：填静音
             return { ok: false, error: `对白静音片段失败 #${i}` };
           }
         }

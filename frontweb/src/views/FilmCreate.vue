@@ -1307,7 +1307,7 @@
           <el-form-item label="对白烧录">
             <div class="video-option-row">
               <el-switch v-model="videoBurnDialogue" />
-              <span v-if="videoBurnDialogue" class="video-option-hint">开启后，将把各镜「配音」生成的对白 TTS 按分镜时长对齐并混入整集成片（无对白音频的分镜为静音）。可与「字幕」旁白同时开启，两条音轨会叠混。</span>
+              <span v-if="videoBurnDialogue" class="video-option-hint">开启后，将把各镜的对白 TTS 按分镜时长对齐并混入整集成片：已预生成的直接使用；未预生成但有对白文本的分镜会在合成时自动调用 TTS（消耗对应积分）；既未预生成也无对白文本的分镜为静音。可与「字幕」旁白同时开启，两条音轨会叠混。</span>
             </div>
           </el-form-item>
           <el-form-item label="水印">
