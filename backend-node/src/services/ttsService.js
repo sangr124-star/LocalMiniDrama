@@ -189,7 +189,8 @@ async function synthesizeWithVolcengine(text, voiceType, accessToken, appid, clu
  * 合成 TTS 并保存到本地文件
  * @returns {{ local_path: string, audio_url: string }}
  */
-async function synthesize(db, log, { text, storyboard_id, config, storage_base, voice_id, speed }) {
+async function synthesize(db, log, opts) {
+  const { text, storyboard_id, config, storage_base, voice_id, speed, user_id } = opts;
   if (!text || !text.trim()) throw new Error('text 不能为空');
   const aiConfigService = require('./aiConfigService');
   const ttsConfig = config || (() => {
@@ -207,7 +208,26 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
   const groupId = ttsConfig.group_id || ttsSettings.group_id || '';
   const ttsModel = ttsConfig.default_model || (Array.isArray(ttsConfig.model) ? ttsConfig.model[0] : ttsConfig.model) || '';
   const finalSpeed = speed || ttsSettings.speed || 1.0;
+
+  // 计费：reserve；失败 refund，成功按 estimated 全额结算（TTS 无真实字符数返回）
+  const creditService = require('./creditService');
+  const { estimateTts } = require('./creditPricing');
+  let creditLedgerId = null;
+  if (user_id) {
+    const est = estimateTts(db, { model: ttsModel, text });
+    creditLedgerId = creditService.reserve(db, user_id, est.estimated, 'tts.synth', {
+      service_type: 'tts',
+      model: ttsModel,
+      price_snapshot: est.snapshot,
+    });
+    if (log) log.info('credits reserve', { scope: 'tts.synth', user_id, estimated: est.estimated, ledger_id: creditLedgerId });
+  } else if (log) {
+    log.warn('[credits] tts.synth called without user_id, skipping billing', { model: ttsModel });
+  }
+
   let audioBuffer;
+
+  try {
 
   if (provider === 'minimax') {
     audioBuffer = await synthesizeWithMinimax(
@@ -250,8 +270,22 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
   fs.writeFileSync(filePath, audioBuffer);
   const localPath = `audio/${filename}`;
   log.info('[TTS] 合成完成', { storyboard_id, local_path: localPath, provider });
-  try { const cs = require('./cloudService'); cs.reportUsage('tts', ttsModel || '', '', 0); } catch (_) {}
+  if (creditLedgerId) {
+    try {
+      creditService.settle(db, creditLedgerId, null, null);
+      if (log) log.info('credits settle', { scope: 'tts.synth', ledger_id: creditLedgerId });
+    } catch (e) { if (log) log.error('credits settle failed', { err: e.message, ledger_id: creditLedgerId }); }
+  }
   return { local_path: localPath };
+
+  } catch (err) {
+    if (creditLedgerId) {
+      try { creditService.refund(db, creditLedgerId, err.message || 'unknown'); }
+      catch (e2) { if (log) log.error('credits refund failed', { err: e2.message, ledger_id: creditLedgerId }); }
+      if (log) log.info('credits refunded', { scope: 'tts.synth', ledger_id: creditLedgerId, reason: err.message });
+    }
+    throw err;
+  }
 }
 
 module.exports = { synthesize };
