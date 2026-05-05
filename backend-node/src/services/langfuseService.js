@@ -109,7 +109,8 @@ function createTrace(opts) {
  * @param {object} opts
  * @param {string} opts.name      中文（如「第1集-剧本生成」）
  * @param {string} opts.model     具体模型 ID（如 doubao-seed-2-0-pro-260215），不要传厂商类型
- * @param {any} [opts.input]      输入（对象会被序列化），通常 { systemPrompt, userPrompt }
+ * @param {any} [opts.input]      推荐传 OpenAI 标准 messages 数组：[{role:'system',content:...},{role:'user',content:...}]
+ *                                Langfuse 会用聊天泡泡渲染；传对象/字符串则用 JSON/纯文本视图。
  * @param {object} [opts.modelParameters]  temperature / max_tokens 等
  */
 function createGeneration(trace, opts) {
@@ -132,18 +133,20 @@ function createGeneration(trace, opts) {
  * 结束一个 Generation。
  * @param {object} generation
  * @param {object} opts
- * @param {any} [opts.output]
- * @param {object} [opts.usage]   { promptTokens, completionTokens, totalTokens }
+ * @param {any} [opts.output]            推荐传字符串（模型返回文本）；非字符串会被序列化
+ * @param {object} [opts.usageDetails]   OpenAI 原生 usage 直传（{prompt_tokens, completion_tokens, total_tokens}）。
+ *                                       Langfuse SDK 内部识别此格式，自动渲染 token 统计。
  * @param {'ERROR'|'WARNING'|null} [opts.level]
  * @param {string} [opts.statusMessage]
  */
 function updateGeneration(generation, opts) {
   if (!_enabled || !generation) return;
   try {
-    const { output, usage, level, statusMessage } = opts || {};
+    const { output, usageDetails, level, statusMessage } = opts || {};
     generation.end({
       output,
-      usage,
+      // Langfuse SDK 接受 ApiUsageDetails，可直接传 OpenAI 原生 {prompt_tokens, completion_tokens, total_tokens}
+      ...(usageDetails ? { usageDetails } : {}),
       level: level || undefined,
       statusMessage: statusMessage || undefined,
     });

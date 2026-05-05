@@ -13,14 +13,12 @@ const SCOPE_TRACE_NAME = {
   'text.vision': '视觉理解',
 };
 
-/** OpenAI usage 格式 → Langfuse usage 格式 */
-function _toLangfuseUsage(usage) {
-  if (!usage) return undefined;
-  return {
-    promptTokens: usage.prompt_tokens,
-    completionTokens: usage.completion_tokens,
-    totalTokens: usage.total_tokens,
-  };
+/** 把 systemPrompt + userPrompt 组装成 OpenAI 标准 messages 数组（Langfuse 控制台会用聊天泡泡渲染） */
+function _buildLangfuseMessages(systemPrompt, userPrompt) {
+  const messages = [];
+  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt });
+  if (userPrompt) messages.push({ role: 'user', content: userPrompt });
+  return messages;
 }
 
 /** 用 user_id 反查 username（用于 Langfuse trace 标签）。失败返回空串，不抛错 */
@@ -77,7 +75,7 @@ async function _billedTextCall(db, log, scope, opts, doCall) {
   const generation = langfuseService.createGeneration(trace, {
     name: `${scope}-${opts.model || 'unknown'}`,
     model: opts.model || 'unknown',
-    input: { systemPrompt: opts.systemPrompt, userPrompt: opts.userPrompt },
+    input: _buildLangfuseMessages(opts.systemPrompt, opts.userPrompt),
     modelParameters: {
       temperature: opts.temperature,
       max_tokens: opts.max_tokens,
@@ -90,11 +88,11 @@ async function _billedTextCall(db, log, scope, opts, doCall) {
       const r = await doCall();
       langfuseService.updateGeneration(generation, {
         output: r.content,
-        usage: _toLangfuseUsage(r.usage),
+        usageDetails: r.usage || undefined,
       });
       langfuseService.finalizeTrace(trace, {
         success: true,
-        output: { contentPreview: typeof r.content === 'string' ? r.content.slice(0, 200) : null },
+        output: typeof r.content === 'string' ? r.content.slice(0, 500) : r.content,
         totalTokens: r.usage?.total_tokens,
       });
       return r.content;
@@ -133,11 +131,11 @@ async function _billedTextCall(db, log, scope, opts, doCall) {
 
     langfuseService.updateGeneration(generation, {
       output: r.content,
-      usage: _toLangfuseUsage(r.usage),
+      usageDetails: r.usage || undefined,
     });
     langfuseService.finalizeTrace(trace, {
       success: true,
-      output: { contentPreview: typeof r.content === 'string' ? r.content.slice(0, 200) : null },
+      output: typeof r.content === 'string' ? r.content.slice(0, 500) : r.content,
       totalTokens: r.usage?.total_tokens,
     });
     return r.content;
