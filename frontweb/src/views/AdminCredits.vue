@@ -1,8 +1,13 @@
 <template>
   <div class="admin-credits">
     <div class="header-bar">
-      <el-button link @click="$router.push('/')">← 返回首页</el-button>
       <h2 class="title">积分管理</h2>
+      <div class="header-actions">
+        <el-button @click="$router.push('/')">
+          <el-icon><ArrowLeft /></el-icon>
+          返回首页
+        </el-button>
+      </div>
     </div>
 
     <el-tabs v-model="activeTab" @tab-change="onTabChange">
@@ -201,6 +206,7 @@
 import { ref, onMounted } from 'vue'
 import { creditsAPI } from '@/api/credits'
 import { ElMessage } from 'element-plus'
+import { ArrowLeft } from '@element-plus/icons-vue'
 
 const activeTab = ref('stats')
 
@@ -320,8 +326,13 @@ onMounted(async () => {
 .header-bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
+}
+.header-bar .header-actions {
+  display: flex;
+  gap: 8px;
 }
 .title { margin: 0; font-size: 22px; }
 .stat-grid {

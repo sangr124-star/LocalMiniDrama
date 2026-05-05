@@ -1,8 +1,13 @@
 <template>
   <div class="my-credits">
     <div class="header-bar">
-      <el-button link @click="$router.back()">← 返回</el-button>
       <h2 class="title">我的积分</h2>
+      <div class="header-actions">
+        <el-button @click="$router.back()">
+          <el-icon><ArrowLeft /></el-icon>
+          返回
+        </el-button>
+      </div>
     </div>
 
     <div class="balance-cards">
@@ -93,6 +98,7 @@
 import { ref, onMounted } from 'vue'
 import { creditsAPI } from '@/api/credits'
 import { getUser } from '@/utils/request'
+import { ArrowLeft } from '@element-plus/icons-vue'
 
 const balance = ref(0)
 const totalRecharged = ref(0)
@@ -150,8 +156,13 @@ onMounted(load)
 .header-bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
+}
+.header-bar .header-actions {
+  display: flex;
+  gap: 8px;
 }
 .title {
   margin: 0;

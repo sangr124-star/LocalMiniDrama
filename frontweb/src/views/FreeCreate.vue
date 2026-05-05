@@ -2,13 +2,15 @@
   <div class="free-create-page">
     <div class="page-header">
       <div class="header-left">
-        <el-button text @click="$router.back()">
+        <h2 class="page-title">自由创作</h2>
+        <p class="page-desc">不绑定剧集，直接输入文字生成图片或视频</p>
+      </div>
+      <div class="header-actions">
+        <el-button @click="$router.back()">
           <el-icon><ArrowLeft /></el-icon>
           返回
         </el-button>
-        <h2 class="page-title">自由创作</h2>
       </div>
-      <p class="page-desc">不绑定剧集，直接输入文字生成图片或视频</p>
     </div>
 
     <div class="create-layout">
@@ -323,14 +325,23 @@ async function pollVideoTask(taskId, item, maxMs = 300000) {
 }
 
 .page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   margin-bottom: 20px;
+  gap: 16px;
 }
 
 .header-left {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 6px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.page-header .header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .page-title {

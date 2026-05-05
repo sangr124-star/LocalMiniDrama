@@ -2,10 +2,6 @@
   <div class="media-library-page">
     <div class="page-header">
       <div class="header-left">
-        <el-button text @click="$router.back()">
-          <el-icon><ArrowLeft /></el-icon>
-          返回
-        </el-button>
         <h2 class="page-title">媒体素材库</h2>
       </div>
       <div class="header-actions">
@@ -14,6 +10,10 @@
           上传素材
         </el-button>
         <input ref="uploadInput" type="file" accept="image/*,video/*" multiple style="display:none" @change="onUpload" />
+        <el-button @click="$router.back()">
+          <el-icon><ArrowLeft /></el-icon>
+          返回
+        </el-button>
       </div>
     </div>
 

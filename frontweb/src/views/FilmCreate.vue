@@ -9,10 +9,6 @@
         </h1>
         <span class="breadcrumb-sep">›</span>
         <span class="page-title">{{ dramaId ? (store.drama?.title || '项目') : '新建故事' }}</span>
-        <el-button v-if="dramaId" class="btn-back-drama" @click="router.push('/drama/' + dramaId)">
-          <el-icon><ArrowLeft /></el-icon>
-          返回剧集
-        </el-button>
         <div class="header-actions">
           <el-button class="btn-theme" :title="isDark ? '切换到浅色模式' : '切换到暗色模式'" @click="toggleTheme">
             <el-icon><Sunny v-if="isDark" /><Moon v-else /></el-icon>
@@ -21,6 +17,10 @@
           <el-button v-if="isSuperAdmin" class="btn-ai-config" @click="showAiConfigDialog = true">
             <el-icon><Setting /></el-icon>
             AI配置
+          </el-button>
+          <el-button v-if="dramaId" class="btn-back-drama" @click="router.push('/drama/' + dramaId)">
+            <el-icon><ArrowLeft /></el-icon>
+            返回剧集
           </el-button>
         </div>
       </div>

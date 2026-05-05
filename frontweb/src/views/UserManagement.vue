@@ -2,9 +2,12 @@
   <div class="user-mgmt">
     <div class="header">
       <h2>用户管理</h2>
-      <div>
-        <el-button @click="goHome">返回首页</el-button>
+      <div class="header-actions">
         <el-button type="primary" @click="openCreate">新建用户</el-button>
+        <el-button @click="goHome">
+          <el-icon><ArrowLeft /></el-icon>
+          返回首页
+        </el-button>
       </div>
     </div>
 
@@ -100,6 +103,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { adminAPI } from '@/api/auth'
 import { getUser } from '@/utils/request'
 import GrantCreditsDialog from '@/components/GrantCreditsDialog.vue'
@@ -247,5 +251,9 @@ onMounted(loadUsers)
 }
 .header h2 {
   margin: 0;
+}
+.header .header-actions {
+  display: flex;
+  gap: 8px;
 }
 </style>
