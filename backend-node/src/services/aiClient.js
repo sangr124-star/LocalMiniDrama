@@ -2,8 +2,37 @@
 const aiConfigService = require('./aiConfigService');
 const creditService = require('./creditService');
 const { estimateText, settleText } = require('./creditPricing');
+const langfuseService = require('./langfuseService');
 const https = require('https');
 const http = require('http');
+
+// scope -> 中文 trace name 映射（adcast 经验：英文标签在 Langfuse 控制台难辨认）
+const SCOPE_TRACE_NAME = {
+  'text.chat': '文本生成',
+  'text.stream': '文本流式生成',
+  'text.vision': '视觉理解',
+};
+
+/** OpenAI usage 格式 → Langfuse usage 格式 */
+function _toLangfuseUsage(usage) {
+  if (!usage) return undefined;
+  return {
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    totalTokens: usage.total_tokens,
+  };
+}
+
+/** 用 user_id 反查 username（用于 Langfuse trace 标签）。失败返回空串，不抛错 */
+function _lookupUsername(db, userId) {
+  if (!userId) return '';
+  try {
+    const row = db.prepare('SELECT username FROM users WHERE id=?').get(Number(userId));
+    return row?.username || '';
+  } catch (_) {
+    return '';
+  }
+}
 
 /**
  * 文本/视觉调用的内部计费助手
@@ -29,10 +58,54 @@ async function _billedTextCall(db, log, scope, opts, doCall) {
       if (drow && drow.user_id) userId = drow.user_id;
     } catch (_) {}
   }
+  const username = _lookupUsername(db, userId);
+
+  // 创建 Langfuse trace（user_id 缺失时也建，username 留空；未启用时返回 null 走 no-op）
+  const trace = langfuseService.createTrace({
+    name: SCOPE_TRACE_NAME[scope] || scope,
+    userId: userId || undefined,
+    username,
+    sessionId: opts.drama_id != null ? `drama-${opts.drama_id}` : undefined,
+    metadata: {
+      调用范围: scope,
+      模型: opts.model || 'unknown',
+      ...(opts.drama_id != null ? { 剧目ID: opts.drama_id } : {}),
+      ...(opts.episode_id != null ? { 集数ID: opts.episode_id } : {}),
+      ...(opts.scene_key ? { 场景键: opts.scene_key } : {}),
+    },
+  });
+  const generation = langfuseService.createGeneration(trace, {
+    name: `${scope}-${opts.model || 'unknown'}`,
+    model: opts.model || 'unknown',
+    input: { systemPrompt: opts.systemPrompt, userPrompt: opts.userPrompt },
+    modelParameters: {
+      temperature: opts.temperature,
+      max_tokens: opts.max_tokens,
+    },
+  });
+
   if (!userId) {
     if (log) log.warn(`[credits] ${scope} called without user_id, skipping billing`, { model: opts?.model });
-    const r = await doCall();
-    return r.content;
+    try {
+      const r = await doCall();
+      langfuseService.updateGeneration(generation, {
+        output: r.content,
+        usage: _toLangfuseUsage(r.usage),
+      });
+      langfuseService.finalizeTrace(trace, {
+        success: true,
+        output: { contentPreview: typeof r.content === 'string' ? r.content.slice(0, 200) : null },
+        totalTokens: r.usage?.total_tokens,
+      });
+      return r.content;
+    } catch (err) {
+      langfuseService.updateGeneration(generation, {
+        level: 'ERROR',
+        statusMessage: err.message || 'unknown',
+      });
+      langfuseService.finalizeTrace(trace, { success: false, error: err.message || 'unknown' });
+      throw err;
+    }
   }
   const { estimated, snapshot } = estimateText(db, {
     model: opts.model || 'unknown',
@@ -57,11 +130,27 @@ async function _billedTextCall(db, log, scope, opts, doCall) {
     try { creditService.settle(db, ledgerId, realCost, snapshot); }
     catch (e) { if (log) log.error('credits settle failed', { err: e.message, ledger_id: ledgerId }); }
     if (log) log.info('credits settle', { scope, ledger_id: ledgerId, real_cost: realCost ?? estimated, has_usage: !!r.usage });
+
+    langfuseService.updateGeneration(generation, {
+      output: r.content,
+      usage: _toLangfuseUsage(r.usage),
+    });
+    langfuseService.finalizeTrace(trace, {
+      success: true,
+      output: { contentPreview: typeof r.content === 'string' ? r.content.slice(0, 200) : null },
+      totalTokens: r.usage?.total_tokens,
+    });
     return r.content;
   } catch (err) {
     try { creditService.refund(db, ledgerId, err.message || 'unknown'); }
     catch (e2) { if (log) log.error('credits refund failed', { err: e2.message, ledger_id: ledgerId }); }
     if (log) log.info('credits refunded', { scope, ledger_id: ledgerId, reason: err.message });
+
+    langfuseService.updateGeneration(generation, {
+      level: 'ERROR',
+      statusMessage: err.message || 'unknown',
+    });
+    langfuseService.finalizeTrace(trace, { success: false, error: err.message || 'unknown' });
     throw err;
   }
 }
