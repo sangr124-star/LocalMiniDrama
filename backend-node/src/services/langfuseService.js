@@ -134,8 +134,9 @@ function createGeneration(trace, opts) {
  * @param {object} generation
  * @param {object} opts
  * @param {any} [opts.output]            推荐传字符串（模型返回文本）；非字符串会被序列化
- * @param {object} [opts.usageDetails]   OpenAI 原生 usage 直传（{prompt_tokens, completion_tokens, total_tokens}）。
- *                                       Langfuse SDK 内部识别此格式，自动渲染 token 统计。
+ * @param {object} [opts.usageDetails]   OpenAI 原生 usage（{prompt_tokens, completion_tokens, total_tokens}）。
+ *                                       本函数会同时写 usage（deprecated 兼容老服务端）+ usageDetails（新版），
+ *                                       自托管 Langfuse OSS v2.95 不识别 usageDetails，必须 usage 兼容字段才显示 token。
  * @param {'ERROR'|'WARNING'|null} [opts.level]
  * @param {string} [opts.statusMessage]
  */
@@ -143,10 +144,28 @@ function updateGeneration(generation, opts) {
   if (!_enabled || !generation) return;
   try {
     const { output, usageDetails, level, statusMessage } = opts || {};
+
+    // 把 OpenAI 原生格式 usageDetails 转成 deprecated 但兼容老服务端的 usage 格式（双写）
+    let legacyUsage = undefined;
+    if (usageDetails && typeof usageDetails === 'object') {
+      const u = usageDetails;
+      const inTok = u.prompt_tokens ?? u.input_tokens ?? null;
+      const outTok = u.completion_tokens ?? u.output_tokens ?? null;
+      const totTok = u.total_tokens ?? (inTok != null && outTok != null ? inTok + outTok : null);
+      if (inTok != null || outTok != null || totTok != null) {
+        legacyUsage = {
+          input: inTok != null ? Number(inTok) : 0,
+          output: outTok != null ? Number(outTok) : 0,
+          total: totTok != null ? Number(totTok) : 0,
+          unit: 'TOKENS',
+        };
+      }
+    }
+
     generation.end({
       output,
-      // Langfuse SDK 接受 ApiUsageDetails，可直接传 OpenAI 原生 {prompt_tokens, completion_tokens, total_tokens}
       ...(usageDetails ? { usageDetails } : {}),
+      ...(legacyUsage ? { usage: legacyUsage } : {}),
       level: level || undefined,
       statusMessage: statusMessage || undefined,
     });
