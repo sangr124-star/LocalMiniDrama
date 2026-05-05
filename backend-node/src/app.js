@@ -23,6 +23,13 @@ function createApp() {
   } catch (e) {
     logger.errorw('ensureAdminUser failed', { error: e.message });
   }
+  // Langfuse LLM observability 初始化（启用见 config.yaml.langfuse.enabled）
+  try {
+    const langfuseService = require('./services/langfuseService');
+    langfuseService.init();
+  } catch (e) {
+    logger.errorw('langfuse init failed', { error: e.message });
+  }
   const log = logger;
 
   const app = express();

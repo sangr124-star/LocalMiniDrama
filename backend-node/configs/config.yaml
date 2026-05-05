@@ -35,3 +35,12 @@ style:
 vendor_lock:
   enabled: false
   config_file: ai-configs-qudao.json
+# Langfuse LLM observability（mj 自托管实例）
+# 默认空值；生产环境 mj 服务器手动填 enabled=true + 真凭证（凭证不进 git，配合 git update-index --assume-unchanged）
+langfuse:
+  enabled: false
+  host: https://mjlf.aijianshou.com
+  public_key: ''
+  secret_key: ''
+  flush_at: 15
+  flush_interval: 10000

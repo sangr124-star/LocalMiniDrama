@@ -14,8 +14,15 @@ const server = app.listen(port, host, () => {
   logger.info('Server is ready!');
 });
 
-function shutdown() {
+async function shutdown() {
   logger.info('Shutting down server...');
+  // 先 flush Langfuse 队列，避免丢 trace
+  try {
+    const langfuseService = require('./services/langfuseService');
+    await langfuseService.shutdown();
+  } catch (e) {
+    logger.errorw('langfuse shutdown failed', { error: e.message });
+  }
   server.close(() => {
     closeDb();
     logger.info('Server exited');
