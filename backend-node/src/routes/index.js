@@ -24,7 +24,7 @@ const authRoutes = require('./auth');
 const adminRoutes = require('./admin');
 const creditRoutes = require('./credits');
 const { buildAuthMiddleware } = require('../middleware/auth');
-const { requireSuperAdmin, requireAdminOrAbove } = require('../middleware/permissions');
+const { requireSuperAdmin } = require('../middleware/permissions');
 const { buildOwnershipMiddleware } = require('../middleware/ownership');
 
 function setupRouter(cfg, db, log) {
@@ -44,20 +44,20 @@ function setupRouter(cfg, db, log) {
   r.get('/auth/me', auth.me);
   r.post('/auth/change-password', auth.changePassword);
 
-  // ---------- 用户管理（admin + super_admin 都可访问；细粒度由 service 层控制） ----------
-  r.get('/admin/users', requireAdminOrAbove, admin.listUsers);
-  r.post('/admin/users', requireAdminOrAbove, admin.createUser);
-  r.put('/admin/users/:id', requireAdminOrAbove, admin.updateUser);
-  r.post('/admin/users/:id/reset-password', requireAdminOrAbove, admin.resetPassword);
-  r.delete('/admin/users/:id', requireAdminOrAbove, admin.deleteUser);
+  // ---------- 用户管理（仅 super_admin 可访问） ----------
+  r.get('/admin/users', requireSuperAdmin, admin.listUsers);
+  r.post('/admin/users', requireSuperAdmin, admin.createUser);
+  r.put('/admin/users/:id', requireSuperAdmin, admin.updateUser);
+  r.post('/admin/users/:id/reset-password', requireSuperAdmin, admin.resetPassword);
+  r.delete('/admin/users/:id', requireSuperAdmin, admin.deleteUser);
 
   // ---------- 积分体系 ----------
   const credits = creditRoutes(db, log);
   r.get('/credits/balance', credits.myBalance);
   r.get('/credits/ledger', credits.myLedger);
-  r.get('/credits/users/:id/balance', requireAdminOrAbove, credits.userBalance);
-  r.get('/credits/users/:id/ledger', requireAdminOrAbove, credits.userLedger);
-  r.post('/credits/users/:id/grant', requireAdminOrAbove, credits.grant);
+  r.get('/credits/users/:id/balance', requireSuperAdmin, credits.userBalance);
+  r.get('/credits/users/:id/ledger', requireSuperAdmin, credits.userLedger);
+  r.post('/credits/users/:id/grant', requireSuperAdmin, credits.grant);
   r.post('/credits/users/:id/deduct', requireSuperAdmin, credits.deduct);
   r.get('/credits/pricing', requireSuperAdmin, credits.listPricing);
   r.post('/credits/pricing', requireSuperAdmin, credits.createPricing);

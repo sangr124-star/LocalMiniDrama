@@ -34,7 +34,7 @@
           <el-button v-if="isSuperAdmin" class="btn-settings" @click="showAiConfigDialog = true">
             <el-icon><Setting /></el-icon>AI配置
           </el-button>
-          <el-button v-if="isAdminOrAbove" class="btn-settings" title="用户管理" @click="$router.push('/admin/users')">
+          <el-button v-if="isSuperAdmin" class="btn-settings" title="用户管理" @click="$router.push('/admin/users')">
             <el-icon><User /></el-icon>用户管理
           </el-button>
           <el-button class="btn-import" :loading="importing" @click="triggerImport">
@@ -450,7 +450,6 @@ const dramas = ref([])
 const total = ref(0)
 const currentUser = ref(getUser())
 const isSuperAdmin = computed(() => currentUser.value?.role === 'super_admin')
-const isAdminOrAbove = computed(() => ['admin', 'super_admin'].includes(currentUser.value?.role))
 // super_admin 专属：是否查看全部用户内容（默认仅自己）
 const showAllUsers = ref(false)
 
