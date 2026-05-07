@@ -143,8 +143,8 @@
         style="display: none"
         @change="onSbImageFileChange"
       />
-      <!-- 1. 故事生成 -->
-      <section class="section card">
+      <!-- 1. 故事生成（暂时隐藏；批量导入剧集后该模块在 film 页基本不用） -->
+      <section v-if="false" class="section card">
         <h2 class="section-title">故事生成</h2>
         <p class="section-desc">输入一段故事梗概，AI 帮你扩写成完整剧本，或直接导入小说章节</p>
         <el-input
