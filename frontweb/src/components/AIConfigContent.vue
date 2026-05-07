@@ -1302,6 +1302,7 @@ const providerConfigs = {
     { id: 'volcengine', name: '火山引擎', models: ['doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828'] },
     { id: 'kling', name: '可灵 Kling', models: ['kling-image', 'kling-omni-image'] },
     { id: 'nano_banana', name: 'NanoBanana', models: ['nano-banana-2', 'nano-banana-pro', 'nano-banana'] },
+    { id: 'modelgate', name: 'ModelGate 网关', models: ['image2_low', 'image2_medium', 'gem-3.0', 'gem-3.1'] },
     // { id: 'chatfire', name: 'Chatfire', models: ['nano-banana-pro', 'doubao-seedream-4-5-251128', 'qwen-image'] },
     { id: 'gemini', name: 'Google Gemini', models: ['gemini-2.5-flash-image', 'gemini-2.5-flash-image-preview', 'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview'] },
     { id: 'openai', name: 'OpenAI', models: ['dall-e-3', 'dall-e-2'] }
@@ -1567,9 +1568,14 @@ function onProviderChange(providerId) {
   const st = form.value.service_type || 'text'
   const p = (providerConfigs[st] || []).find((x) => x.id === providerId)
   if (!p) {
-    form.value.base_url = ''
+    // 自由输入或当前 service_type 未注册该 provider 时，仍然按 providerProtocolMap 设接口规范
+    // 同时尝试从 getBaseUrlForProvider 给出默认 URL（modelgate 等也能命中）
+    form.value.base_url = getBaseUrlForProvider(providerId) || ''
     form.value.modelText = ''
     form.value.default_model = ''
+    if (providerProtocolMap[providerId]) {
+      form.value.api_protocol = providerProtocolMap[providerId]
+    }
     return
   }
   // TTS + volcengine 用 openspeech 而不是 ark
