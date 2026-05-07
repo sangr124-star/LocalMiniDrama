@@ -76,6 +76,11 @@ router.beforeEach(async (to) => {
     const t = String(to.query.sso_token)
     try {
       localStorage.setItem('minidrama_token', t)
+      // 记下门户 origin（仅 http(s)），子页面「返回」按钮借此回门户
+      if (to.query.portal_origin) {
+        const po = String(to.query.portal_origin)
+        if (/^https?:\/\//i.test(po)) sessionStorage.setItem('portal_origin', po)
+      }
       // 同步获取一次 user（/api/v1/auth/me 走 axios 默认带 token）
       const { default: axios } = await import('axios')
       try {
@@ -87,6 +92,7 @@ router.beforeEach(async (to) => {
     } catch (_) {}
     const next = Object.assign({}, to.query)
     delete next.sso_token
+    delete next.portal_origin
     return { path: to.path, query: next, replace: true }
   }
   // 公共页（登录页）

@@ -51,6 +51,9 @@
           <el-button v-if="currentUser" class="btn-theme" :title="`点击修改密码 - ${currentUser.username}`" @click="onChangePassword">
             <el-icon><User /></el-icon>{{ roleLabel(currentUser) }}
           </el-button>
+          <el-button v-if="hasPortalOrigin" class="btn-theme" title="返回 jz 门户" @click="onBackToPortal">
+            <el-icon><Back /></el-icon>返回门户
+          </el-button>
           <el-button v-if="currentUser" class="btn-theme" title="退出登录" @click="onLogout">
             <el-icon><SwitchButton /></el-icon>退出
           </el-button>
@@ -371,7 +374,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Edit, Delete, Setting, Plus, User, PictureFilled, Box, Sunny, Moon, ChatDotSquare, Download, Upload, QuestionFilled, FolderOpened, MagicStick, Files, SwitchButton, Coin } from '@element-plus/icons-vue'
+import { Edit, Delete, Setting, Plus, User, PictureFilled, Box, Sunny, Moon, ChatDotSquare, Download, Upload, QuestionFilled, FolderOpened, MagicStick, Files, SwitchButton, Coin, Back } from '@element-plus/icons-vue'
 import CreditBalanceBadge from '@/components/CreditBalanceBadge.vue'
 import { useTheme } from '@/composables/useTheme'
 import { dramaAPI } from '@/api/drama'
@@ -461,7 +464,26 @@ function roleLabel(user) {
 
 async function onLogout() {
   clearAuth()
+  // 退出本地账号时同步清掉 portal origin，避免影响下个登录的用户
+  try { sessionStorage.removeItem('portal_origin') } catch (_) {}
   router.replace('/login')
+}
+
+// 是否有 jz portal origin（决定「返回门户」按钮显隐）
+const hasPortalOrigin = computed(() => {
+  try {
+    const o = sessionStorage.getItem('portal_origin')
+    return !!(o && /^https?:\/\//i.test(o))
+  } catch (_) { return false }
+})
+
+function onBackToPortal() {
+  try {
+    const o = sessionStorage.getItem('portal_origin')
+    if (o && /^https?:\/\//i.test(o)) {
+      window.location.href = o
+    }
+  } catch (_) {}
 }
 
 async function onChangePassword() {

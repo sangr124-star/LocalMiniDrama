@@ -77,7 +77,13 @@ function buildSsoHandler(db) {
 
     const safeRedirect = redirect.startsWith('/') ? redirect : '/';
     const sep = safeRedirect.includes('?') ? '&' : '?';
-    res.redirect(`${safeRedirect}${sep}sso_token=${encodeURIComponent(localToken)}`);
+    let target = `${safeRedirect}${sep}sso_token=${encodeURIComponent(localToken)}`;
+    // 透传门户 origin（仅 http(s) 协议），子页面「返回」按钮借此回门户
+    const portalOrigin = req.query.portal_origin && String(req.query.portal_origin);
+    if (portalOrigin && /^https?:\/\//i.test(portalOrigin)) {
+      target += `&portal_origin=${encodeURIComponent(portalOrigin)}`;
+    }
+    res.redirect(target);
   };
 }
 
