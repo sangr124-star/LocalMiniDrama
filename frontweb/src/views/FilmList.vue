@@ -51,10 +51,12 @@
           <el-button v-if="currentUser" class="btn-theme" :title="`点击修改密码 - ${currentUser.username}`" @click="onChangePassword">
             <el-icon><User /></el-icon>{{ roleLabel(currentUser) }}
           </el-button>
-          <el-button v-if="hasPortalOrigin" class="btn-theme" title="返回 jz 门户" @click="onBackToPortal">
+          <!-- 来自门户：仅显示「返回门户」，本地退出交由门户负责 -->
+          <el-button v-if="hasPortalOrigin" class="btn-theme" title="返回门户首页" @click="onBackToPortal">
             <el-icon><Back /></el-icon>返回门户
           </el-button>
-          <el-button v-if="currentUser" class="btn-theme" title="退出登录" @click="onLogout">
+          <!-- 直接本地登录：显示「退出」 -->
+          <el-button v-else-if="currentUser" class="btn-theme" title="退出登录" @click="onLogout">
             <el-icon><SwitchButton /></el-icon>退出
           </el-button>
         </div>
