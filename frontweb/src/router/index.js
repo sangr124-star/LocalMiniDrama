@@ -67,9 +67,27 @@ const router = createRouter({
   ]
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   if (to.meta.title) {
     document.title = `${to.meta.title} - AI漫剧`
+  }
+  // jz portal SSO 跳转回来：?sso_token=xxx → 写 localStorage，去掉 query，fetch 一次 user
+  if (to.query.sso_token) {
+    const t = String(to.query.sso_token)
+    try {
+      localStorage.setItem('minidrama_token', t)
+      // 同步获取一次 user（/api/v1/auth/me 走 axios 默认带 token）
+      const { default: axios } = await import('axios')
+      try {
+        const res = await axios.get('/api/v1/auth/me', { headers: { Authorization: `Bearer ${t}` } })
+        if (res.data && res.data.success && res.data.data) {
+          localStorage.setItem('minidrama_user', JSON.stringify(res.data.data))
+        }
+      } catch (_) { /* /me 失败不阻塞 */ }
+    } catch (_) {}
+    const next = Object.assign({}, to.query)
+    delete next.sso_token
+    return { path: to.path, query: next, replace: true }
   }
   // 公共页（登录页）
   if (to.meta.public) return true
