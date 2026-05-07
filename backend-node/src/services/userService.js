@@ -143,7 +143,7 @@ function deleteUser(db, id) {
 // === jz portal SSO 投影 ===
 function findByPortalUserId(db, portalUserId) {
   if (!portalUserId) return null;
-  return db.prepare('SELECT * FROM users WHERE portal_user_id = ? AND (deleted_at IS NULL OR deleted_at = "")').get(portalUserId);
+  return db.prepare("SELECT * FROM users WHERE portal_user_id = ? AND (deleted_at IS NULL OR deleted_at = '')").get(portalUserId);
 }
 
 function createFromPortal(db, { portalUserId, username, displayName, role }) {
