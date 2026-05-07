@@ -140,6 +140,30 @@ function deleteUser(db, id) {
   return true;
 }
 
+// === jz portal SSO 投影 ===
+function findByPortalUserId(db, portalUserId) {
+  if (!portalUserId) return null;
+  return db.prepare("SELECT * FROM users WHERE portal_user_id = ? AND (deleted_at IS NULL OR deleted_at = '')").get(portalUserId);
+}
+
+function createFromPortal(db, { portalUserId, username, displayName, role }) {
+  // 处理 username 撞名：本地已有同名 user 但 portal_user_id 不同（或为 null）就加后缀
+  const existing = db.prepare('SELECT id, portal_user_id FROM users WHERE username = ?').get(username);
+  let finalUsername = username;
+  if (existing && existing.portal_user_id !== portalUserId) {
+    finalUsername = `${username}_p${portalUserId}`;
+  }
+  // 占位密码 hash：portal 用户走 SSO 不能用本地密码登录（hash 不可被任何明文 verify 通过）
+  const placeholderHash = '$2a$10$portalSsoUserNoLocalPasswordPlaceholder.HashXxxxx';
+  const safeRole = role === 'super_admin' ? 'super_admin' : (role === 'admin' ? 'admin' : 'user');
+  const now = new Date().toISOString();
+  const info = db.prepare(
+    `INSERT INTO users (username, password, nickname, role, status, portal_user_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`
+  ).run(finalUsername, placeholderHash, displayName || finalUsername, safeRole, portalUserId, now, now);
+  return findById(db, info.lastInsertRowid);
+}
+
 module.exports = {
   ensureAdminUser,
   findByUsername,
@@ -152,4 +176,6 @@ module.exports = {
   changeOwnPassword,
   deleteUser,
   rowToUser,
+  findByPortalUserId,
+  createFromPortal,
 };
