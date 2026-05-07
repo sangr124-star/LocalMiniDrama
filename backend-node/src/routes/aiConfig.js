@@ -136,6 +136,7 @@ function testConnection(log) {
         provider: body.provider,
         endpoint: body.endpoint,
         service_type: body.service_type,
+        settings: body.settings,  // ModelGate 等需要 settings.secret_key 才能签名
       });
       response.success(res, { message: '连接测试成功' });
     } catch (err) {

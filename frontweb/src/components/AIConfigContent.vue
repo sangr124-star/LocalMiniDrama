@@ -1911,7 +1911,9 @@ async function openTest(row) {
       model: Array.isArray(row.model) ? row.model[0] : row.model,
       provider: row.provider,
       endpoint: row.endpoint,
-      service_type: row.service_type
+      service_type: row.service_type,
+      // ModelGate 等需要 settings.secret_key 才能签名，必须把 settings 一起带过去
+      settings: row.settings || ''
     })
     testResult.value = true
   } catch (e) {
