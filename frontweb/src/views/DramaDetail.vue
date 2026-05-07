@@ -949,14 +949,23 @@ function epStatusLabel(status) {
 }
 
 async function onBatchImportEpisodes(importedEpisodes) {
-  const current = episodes.value.map((ep, i) => ({
-    episode_number: ep.episode_number ?? i + 1,
-    title: ep.title || '第' + (ep.episode_number ?? i + 1) + '集',
-    script_content: ep.script_content || '',
-    description: ep.description ?? null,
-    duration: ep.duration ?? 0,
+  // 已有「空壳」集（无剧本内容）丢弃，避免「自动占位 + 导入」叠成多余的空首集
+  const current = episodes.value
+    .filter((ep) => (ep.script_content || '').trim().length > 0)
+    .map((ep, i) => ({
+      episode_number: ep.episode_number ?? i + 1,
+      title: ep.title || '第' + (ep.episode_number ?? i + 1) + '集',
+      script_content: ep.script_content || '',
+      description: ep.description ?? null,
+      duration: ep.duration ?? 0,
+    }))
+  // 重新连号：导入的集数接在 current 后面（如果 current 全为空，则从 1 开始）
+  const startNumber = current.length + 1
+  const renumbered = importedEpisodes.map((ep, i) => ({
+    ...ep,
+    episode_number: startNumber + i,
   }))
-  await dramaAPI.saveEpisodes(dramaId, [...current, ...importedEpisodes])
+  await dramaAPI.saveEpisodes(dramaId, [...current, ...renumbered])
   await loadDrama()
 }
 

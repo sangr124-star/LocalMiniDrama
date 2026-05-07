@@ -17,9 +17,9 @@
           <el-tab-pane label="1. 导入设置" name="config">
             <div class="batch-import-panel">
               <div class="batch-import-toolbar">
-                <input ref="fileInputRef" type="file" accept=".txt,text/plain" style="display:none" @change="onFileChange" />
-                <el-button @click="fileInputRef?.click()">
-                  <el-icon><Upload /></el-icon>选择 TXT 文件
+                <input ref="fileInputRef" type="file" accept=".txt,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style="display:none" @change="onFileChange" />
+                <el-button @click="fileInputRef?.click()" :loading="parsingFile">
+                  <el-icon><Upload /></el-icon>选择 TXT / Word 文件
                 </el-button>
                 <span class="batch-import-file" :class="{ 'is-empty': !fileName }">
                   {{ fileName || '未选择文件' }}
@@ -36,7 +36,8 @@
               </el-form>
 
               <div class="batch-import-tip-block">
-                <div class="batch-import-tip">将提前准备好的小说原文或者剧本内容的.txt文件导入系统</div>
+                <div class="batch-import-tip">将提前准备好的小说原文或者剧本内容文件（.txt 或 .docx）导入系统</div>
+                <div class="batch-import-tip">.doc 老格式不支持，请在 Word 中另存为 .docx</div>
                 <div class="batch-import-tip">请正确输入用于匹配章节标题的正则表达式。</div>
                 <div class="batch-import-tip">示例：<code class="batch-import-code">^\s*(第\d+章[^\n]*)</code>、<code class="batch-import-code">^\s*(第\d+集[^\n]*)</code></div>
                 <div class="batch-import-tip">点击“确认导入配置”后，会先解析章节并切换到预览页。</div>
@@ -111,10 +112,11 @@ const visible = ref(false)
 const activeTab = ref('config')
 const previewReady = ref(false)
 const importing = ref(false)
+const parsingFile = ref(false)
 const fileInputRef = ref(null)
 const fileName = ref('')
 const rawText = ref('')
-const chapterPattern = ref('^\\s*(第[0-9０-９零一二三四五六七八九十百千万]+[章回节][^\\n\\r]*)')
+const chapterPattern = ref('^\\s*(第[0-9０-９零一二三四五六七八九十百千万]+[章回节集][^\\n\\r]*)')
 const chaptersPerEpisode = ref(1)
 const previewChapters = ref([])
 const previewEpisodes = ref([])
@@ -133,30 +135,68 @@ function resetState() {
   activeTab.value = 'config'
   previewReady.value = false
   importing.value = false
+  parsingFile.value = false
   fileName.value = ''
   rawText.value = ''
-  chapterPattern.value = '^\\s*(第[0-9０-９零一二三四五六七八九十百千万]+[章回节][^\\n\\r]*)'
+  chapterPattern.value = '^\\s*(第[0-9０-９零一二三四五六七八九十百千万]+[章回节集][^\\n\\r]*)'
   chaptersPerEpisode.value = 1
   previewChapters.value = []
   previewEpisodes.value = []
   if (fileInputRef.value) fileInputRef.value.value = ''
 }
 
-function onFileChange(event) {
+// 用 FileReader 把 File 转成纯文本
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (ev) => resolve(String(ev.target?.result || ''))
+    reader.onerror = () => reject(new Error('读取文件失败'))
+    reader.readAsText(file, 'utf-8')
+  })
+}
+
+// 用 mammoth 解析 .docx 文件，提取纯文本（与 Novel 后端 mammoth.extractRawText 等价）
+async function readDocxAsText(file) {
+  const arrayBuffer = await file.arrayBuffer()
+  const mammoth = await import('mammoth/mammoth.browser.js')
+  const result = await mammoth.extractRawText({ arrayBuffer })
+  return result.value || ''
+}
+
+async function onFileChange(event) {
   const file = event.target?.files?.[0]
   if (!file) return
   fileName.value = file.name
   previewReady.value = false
   previewChapters.value = []
   previewEpisodes.value = []
-  const reader = new FileReader()
-  reader.onload = (ev) => {
-    rawText.value = String(ev.target?.result || '')
+  const lower = file.name.toLowerCase()
+  // .doc 老二进制格式无法浏览器解析，提示用户转换
+  if (lower.endsWith('.doc') && !lower.endsWith('.docx')) {
+    ElMessage.error('.doc 旧格式不支持，请在 Word 中另存为 .docx 后再上传')
+    fileName.value = ''
+    if (fileInputRef.value) fileInputRef.value.value = ''
+    return
   }
-  reader.onerror = () => {
-    ElMessage.error('读取文件失败')
+  parsingFile.value = true
+  try {
+    if (lower.endsWith('.docx')) {
+      rawText.value = await readDocxAsText(file)
+      if (!rawText.value.trim()) {
+        ElMessage.warning('Word 文件解析为空，请检查文档内容')
+      }
+    } else {
+      // 默认按文本读取（.txt 或其它纯文本扩展名）
+      rawText.value = await readFileAsText(file)
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '解析文件失败')
+    rawText.value = ''
+    fileName.value = ''
+    if (fileInputRef.value) fileInputRef.value.value = ''
+  } finally {
+    parsingFile.value = false
   }
-  reader.readAsText(file, 'utf-8')
 }
 
 function createChapterRegex(pattern) {
