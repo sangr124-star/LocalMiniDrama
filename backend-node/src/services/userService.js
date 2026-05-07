@@ -161,7 +161,24 @@ function createFromPortal(db, { portalUserId, username, displayName, role }) {
     `INSERT INTO users (username, password, nickname, role, status, portal_user_id, created_at, updated_at)
      VALUES (?, ?, ?, ?, 'active', ?, ?, ?)`
   ).run(finalUsername, placeholderHash, displayName || finalUsername, safeRole, portalUserId, now, now);
-  return findById(db, info.lastInsertRowid);
+  const newUser = rowToUser(findById(db, info.lastInsertRowid));
+
+  // 注册赠送：与本地 createUser 行为对齐（仅普通 user 触发，从 global_settings 读金额）
+  if (safeRole === 'user') {
+    try {
+      const row = db.prepare(`SELECT value FROM global_settings WHERE key='credits.signup_bonus'`).get();
+      const bonus = Math.max(0, Math.ceil(Number(row?.value) || 0));
+      if (bonus > 0) {
+        const creditService = require('./creditService');
+        creditService.grant(db, newUser.id, bonus, newUser.id, '注册赠送（portal SSO）', 'system.signup_bonus');
+        newUser.credit_balance = bonus;
+        newUser.credit_total_recharged = bonus;
+      }
+    } catch (e) {
+      // 赠送失败不阻塞用户创建
+    }
+  }
+  return newUser;
 }
 
 module.exports = {
