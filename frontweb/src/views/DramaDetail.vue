@@ -384,7 +384,7 @@
         <el-form-item label="地点"><el-input v-model="editDramaSceneForm.location" /></el-form-item>
         <el-form-item label="时间"><el-input v-model="editDramaSceneForm.time" placeholder="如：浅色/夜晚" /></el-form-item>
         <el-form-item label="描述"><el-input v-model="editDramaSceneForm.description" type="textarea" :rows="3" placeholder="场景描述" /></el-form-item>
-        <el-form-item label="图片提示词"><el-input v-model="editDramaSceneForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
+        <el-form-item v-if="isSuperAdmin" label="图片提示词"><el-input v-model="editDramaSceneForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDramaSceneVisible = false">取消</el-button>
@@ -411,7 +411,7 @@
         <el-form-item label="名称"><el-input v-model="editDramaPropForm.name" /></el-form-item>
         <el-form-item label="类型"><el-input v-model="editDramaPropForm.type" placeholder="如：关键道具、背景物件" /></el-form-item>
         <el-form-item label="描述"><el-input v-model="editDramaPropForm.description" type="textarea" :rows="3" placeholder="道具描述" /></el-form-item>
-        <el-form-item label="图片提示词"><el-input v-model="editDramaPropForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
+        <el-form-item v-if="isSuperAdmin" label="图片提示词"><el-input v-model="editDramaPropForm.prompt" type="textarea" :rows="2" placeholder="图片生成用的详细提示词" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editDramaPropVisible = false">取消</el-button>
@@ -574,11 +574,14 @@ import { characterAPI } from '@/api/characters'
 import { sceneAPI } from '@/api/scenes'
 import { propAPI } from '@/api/props'
 import { stylePromptMetadataForSave, backfillDramaStylePromptMetadataIfNeeded } from '@/constants/styleOptions'
+import { getUser } from '@/utils/request'
 
 const route = useRoute()
 const { isDark, toggle: toggleTheme } = useTheme()
 const router = useRouter()
 const dramaId = Number(route.params.id)
+// 仅超级管理员可见 AI 内部提示词字段
+const isSuperAdmin = computed(() => getUser()?.role === 'super_admin')
 
 // 图片编辑 – 文件输入 refs（各资源类型独立）
 const charFileRef  = ref(null)

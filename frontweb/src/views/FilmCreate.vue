@@ -986,14 +986,16 @@
                   </div>
                 </div>
               </div>
-              <div class="sb-prompt-label">
-                <span class="sb-dot"></span>
-                <span>图片提示词</span>
-              </div>
-              <div class="sb-prompt-row">
-                <span class="sb-prompt-text">{{ sb.image_prompt || '暂无图片提示词' }}</span>
-                <el-button size="small" link type="primary" @click="onOpenSbPromptDialog(sb)">编辑</el-button>
-              </div>
+              <template v-if="isSuperAdmin">
+                <div class="sb-prompt-label">
+                  <span class="sb-dot"></span>
+                  <span>图片提示词</span>
+                </div>
+                <div class="sb-prompt-row">
+                  <span class="sb-prompt-text">{{ sb.image_prompt || '暂无图片提示词' }}</span>
+                  <el-button size="small" link type="primary" @click="onOpenSbPromptDialog(sb)">编辑</el-button>
+                </div>
+              </template>
               <template v-if="storyboardIncludeNarration || (sbNarration[sb.id] || '').trim() || (sb.narration || '').trim()">
                 <div class="sb-prompt-label">
                   <span class="sb-dot"></span>
@@ -1040,6 +1042,7 @@
                     </el-tooltip>
                   </div>
                   <el-dropdown
+                    v-if="isSuperAdmin"
                     trigger="click"
                     class="sb-universal-prompt-dd"
                     @command="(cmd) => onUniversalSegmentPromptMenu(sb, cmd)"
@@ -1161,7 +1164,7 @@
               <div v-if="hasSbImage(sb)" class="sb-image-actions">
                 <el-button size="small" :loading="generatingSbImageIds.has(sb.id)" @click="onGenerateSbImage(sb)">重新生成</el-button>
                 <el-button
-                  v-if="!isSbUniversalMode(sb.id)"
+                  v-if="!isSbUniversalMode(sb.id) && isSuperAdmin"
                   size="small"
                   type="success"
                   plain
@@ -1249,14 +1252,16 @@
                   </el-button>
                 </el-tooltip>
               </div>
-              <div class="sb-video-prompt-label">
-                <span class="sb-dot"></span>
-                <span>经典视频提示词</span>
-              </div>
-              <div class="sb-video-params-bar">
-                <span class="sb-video-prompt-text sb-video-prompt-text--preview">{{ sb.video_prompt || '暂无视频提示词' }}</span>
-                <el-button size="small" link type="primary" @click="onOpenSbPromptDialog(sb)">手工编辑</el-button>
-              </div>
+              <template v-if="isSuperAdmin">
+                <div class="sb-video-prompt-label">
+                  <span class="sb-dot"></span>
+                  <span>经典视频提示词</span>
+                </div>
+                <div class="sb-video-params-bar">
+                  <span class="sb-video-prompt-text sb-video-prompt-text--preview">{{ sb.video_prompt || '暂无视频提示词' }}</span>
+                  <el-button size="small" link type="primary" @click="onOpenSbPromptDialog(sb)">手工编辑</el-button>
+                </div>
+              </template>
             </div>
           </div>
           </template>
@@ -1454,7 +1459,7 @@
         <el-form-item label="简介">
           <el-input v-model="editCharacterForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="角色背景简介，供剧本生成参考" />
         </el-form-item>
-        <el-form-item v-if="editCharacterForm.id">
+        <el-form-item v-if="editCharacterForm.id && isSuperAdmin">
           <template #label>
             <span style="font-size:12px;line-height:1.4;white-space:normal;word-break:break-all;display:inline-block;width:90px">图生提示词</span>
           </template>
@@ -1590,7 +1595,7 @@
         <el-form-item label="描述">
           <el-input v-model="editPropForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="道具描述" />
         </el-form-item>
-        <el-form-item label="图生提示词">
+        <el-form-item v-if="isSuperAdmin" label="图生提示词">
           <div style="width:100%">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
               <span style="font-size:12px;color:#909399">AI 润色后的图片提示词，生成图片时直接使用；可手动修改</span>
@@ -1649,7 +1654,7 @@
         <el-form-item label="场景描述">
           <el-input v-model="editSceneForm.prompt" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="场景的简要描述，供 AI 生成四视图时参考" />
         </el-form-item>
-        <el-form-item v-if="editSceneForm.id">
+        <el-form-item v-if="editSceneForm.id && isSuperAdmin">
           <template #label>
             <span style="font-size:12px;line-height:1.4;white-space:normal;word-break:break-all;display:inline-block;width:90px">四视图提示词</span>
           </template>
@@ -1858,8 +1863,9 @@
       </template>
     </el-dialog>
 
-    <!-- 分镜提示词编辑弹窗 -->
+    <!-- 分镜提示词编辑弹窗（仅 super_admin 可见 + 可触发） -->
     <el-dialog
+      v-if="isSuperAdmin"
       v-model="showSbPromptDialog"
       :title="`分镜 ${sbPromptTarget?.storyboard_number ?? ''} · 编辑提示词`"
       width="700px"
@@ -2075,7 +2081,7 @@
         <el-form-item label="画面结果">
           <el-input v-model="sbResult[videoParamsTarget.id]" type="textarea" :rows="2" placeholder="动作完成后的画面结果" />
         </el-form-item>
-        <el-form-item label="视频提示词">
+        <el-form-item v-if="isSuperAdmin" label="视频提示词">
           <el-input
             :model-value="buildVideoPromptFromFields(videoParamsTarget.id)"
             type="textarea"
