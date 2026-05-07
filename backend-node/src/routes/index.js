@@ -26,6 +26,7 @@ const creditRoutes = require('./credits');
 const { buildAuthMiddleware } = require('../middleware/auth');
 const { requireSuperAdmin } = require('../middleware/permissions');
 const { buildOwnershipMiddleware } = require('../middleware/ownership');
+const { buildSsoHandler } = require('../middleware/portalSso');
 
 function setupRouter(cfg, db, log) {
   const r = express.Router();
@@ -36,6 +37,8 @@ function setupRouter(cfg, db, log) {
 
   // ---------- 认证（无需登录的端点） ----------
   r.post('/auth/login', auth.login);
+  // jz portal SSO 入口（验签后建/找本地 user，发本地 token，302 回前端）
+  r.get('/auth/sso', buildSsoHandler(db));
 
   // ---------- 全局认证：以下所有路由都需要 token ----------
   r.use(authenticate);
