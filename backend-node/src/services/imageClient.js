@@ -141,6 +141,7 @@ function inferProtocol(provider, model) {
   if (/seedream|doubao/i.test(model || '')) return 'volcengine';
   if (p === 'kling' || p === 'klingai') return 'kling';
   if (/^kling-/i.test(model || '')) return 'kling';
+  if (p === 'modelgate' || p === 'mgate') return 'modelgate';
   return 'openai';
 }
 
@@ -848,6 +849,175 @@ function resolveImageRef(value, filesBaseUrl, storageLocalPath) {
   }
 }
 
+/**
+ * ModelGate（mgate.zhiqungj.com）图片生成
+ *
+ * 网关聚合多家模型，通过 HMAC-SHA256 签名鉴权。本函数支持以下模型族：
+ * - OG（GPT-Image2，模型版本 image2_low / image2_medium）：默认
+ * - GEM（Nano Banana Pro/2，3.0 / 3.1）：自动按 model 名分流到 ExtraParameters 风格
+ *
+ * 参数风格根据 model 自动判别：
+ * - "og*" / "gpt-image2*"  → 大写驼峰 OutputConfig 风格
+ * - "gem*" / "nano-banana*" → 大写驼峰 ExtraParameters 风格
+ *
+ * 状态码（轮询查询）：PROCESSING / FINISH / 失败时 ErrCode != 0
+ *
+ * 返回：{ image_url } | { error }
+ */
+async function callModelGateImageApi(config, log, opts) {
+  const mgate = require('./mgateClient');
+  const { prompt, model, size, image_gen_id, reference_image_urls } = opts;
+
+  // 解析模型名 → ModelName + ModelVersion
+  const m = String(model || 'image2_low').toLowerCase();
+  let ModelName, ModelVersion, isGem;
+  if (/^gem|^nano-banana|^banana/.test(m)) {
+    isGem = true;
+    ModelName = 'GEM';
+    ModelVersion = m.includes('3.1') ? '3.1' : '3.0';
+  } else {
+    isGem = false;
+    ModelName = 'OG';
+    // 接受 image2_low / image2_medium / og:image2_low 等几种写法
+    if (m.includes('medium')) ModelVersion = 'image2_medium';
+    else ModelVersion = 'image2_low';
+  }
+
+  // 解析画幅比：size 一般为 "1024x1024" 或 "1024:1024"，归一化到常见的 1:1 / 16:9 / 9:16
+  const aspectRatio = parseSizeToAspectRatio(size) || '1:1';
+
+  // 参考图：公网 URL 直接传，本地/data URL 不支持（mgate 文档要求 url 形式）
+  const refs = Array.isArray(reference_image_urls) ? reference_image_urls.filter(Boolean) : [];
+  const publicRefs = refs.filter((u) => /^https?:\/\//i.test(u));
+  if (refs.length !== publicRefs.length) {
+    log.warn('[mgate-img] 部分参考图为非 http(s) URL，已忽略', {
+      image_gen_id, total: refs.length, kept: publicRefs.length,
+    });
+  }
+
+  let body;
+  if (isGem) {
+    body = {
+      ModelName,
+      ModelVersion,
+      Prompt: prompt || '',
+      EnhancePrompt: false,
+      ExtraParameters: { AspectRatio: aspectRatio, Resolution: '1080P' },
+    };
+    if (publicRefs.length > 0) {
+      body.ImageInfos = publicRefs.slice(0, 3).map((u) => ({ ImageUrl: u }));
+    }
+  } else {
+    body = {
+      ModelName,
+      ModelVersion,
+      Prompt: prompt || '',
+      EnhancePrompt: 'Enabled',
+      OutputConfig: { AspectRatio: aspectRatio, Resolution: '1080p' },
+    };
+    if (publicRefs.length > 0) {
+      // OG 最多 3 张参考图（详见文档 4.1）
+      body.FileInfos = publicRefs.slice(0, 3).map((u) => ({ Type: 'Url', Url: u }));
+    }
+  }
+
+  log.info('[mgate-img] 创建任务', {
+    image_gen_id, model_name: ModelName, model_version: ModelVersion,
+    aspect: aspectRatio, ref_count: publicRefs.length,
+    prompt_head: (prompt || '').slice(0, 100),
+  });
+
+  let createResp;
+  try {
+    createResp = await mgate.postJson(config, '/ai_router/image_generations', body);
+  } catch (e) {
+    log.error('[mgate-img] 创建网络异常', { image_gen_id, error: e.message });
+    return { error: 'mgate 图片创建网络异常: ' + e.message };
+  }
+  if (createResp.statusCode < 200 || createResp.statusCode >= 300) {
+    const errMsg = (createResp.body && (createResp.body.error?.message || createResp.body.message)) || createResp.raw.slice(0, 300);
+    log.error('[mgate-img] 创建失败', { image_gen_id, status: createResp.statusCode, errMsg });
+    return { error: `mgate 图片创建失败 (${createResp.statusCode}): ${errMsg}` };
+  }
+  const taskId = createResp.body?.Response?.TaskId || createResp.body?.TaskId;
+  if (!taskId) {
+    log.error('[mgate-img] 未拿到 TaskId', { image_gen_id, raw: createResp.raw.slice(0, 300) });
+    return { error: 'mgate 图片创建未返回 TaskId: ' + createResp.raw.slice(0, 200) };
+  }
+
+  // 轮询：5s × 60 = 5min（OG image2_low 实测 ~35s）
+  const queryFn = () => mgate.postJson(config, '/ai_router/image_generations_query', { task_id: taskId });
+  const result = await mgate.pollUntilDone(queryFn, {
+    maxAttempts: 60,
+    intervalMs: 5000,
+    onTick: (i, body) => {
+      const r = body?.Response || body || {};
+      const st = r.Status || r.status;
+      const progress = r.AigcImageTask?.Progress ?? r.Progress ?? '?';
+      if (i === 1 || i % 6 === 0) {
+        log.info('[mgate-img] 轮询', { image_gen_id, task_id: taskId, attempt: i, status: st, progress });
+      }
+    },
+    isDone: (body) => {
+      const r = body?.Response || body || {};
+      const st = r.Status || r.status;
+      return st === 'FINISH' || st === 'DONE' || st === 'succeeded';
+    },
+    isFailed: (body) => {
+      const r = body?.Response || body || {};
+      const st = r.Status || r.status;
+      const errCode = r.AigcImageTask?.ErrCode ?? 0;
+      if (st === 'FAIL' || st === 'failed' || st === 'ABORTED') {
+        const msg = r.AigcImageTask?.Message || r.Message || r.error?.message || '未知失败';
+        return `mgate 图片任务失败: ${msg}`;
+      }
+      if (errCode && errCode !== 0) {
+        return `mgate 图片任务 ErrCode=${errCode}: ${r.AigcImageTask?.Message || ''}`;
+      }
+      return false;
+    },
+  });
+  if (!result.ok) {
+    log.error('[mgate-img] 任务失败/超时', { image_gen_id, error: result.error });
+    return { error: result.error };
+  }
+  const r = result.body?.Response || result.body || {};
+  const fileUrl =
+    r.AigcImageTask?.Output?.FileInfos?.[0]?.FileUrl ||
+    r.ImageUrls?.[0] ||
+    r.Output?.FileInfos?.[0]?.FileUrl;
+  if (!fileUrl) {
+    log.error('[mgate-img] 任务完成但无图片 URL', { image_gen_id, body_head: JSON.stringify(result.body).slice(0, 400) });
+    return { error: 'mgate 图片任务完成但未返回 FileUrl' };
+  }
+  log.info('[mgate-img] 任务完成', { image_gen_id, task_id: taskId, url_head: String(fileUrl).slice(0, 100) });
+  return { image_url: fileUrl };
+}
+
+/** 把 OpenAI 风格 size（"1024x1024"）归一化为 mgate 用的 AspectRatio（"1:1" / "16:9" 等） */
+function parseSizeToAspectRatio(size) {
+  if (!size) return null;
+  const m = String(size).match(/^(\d+)\s*[x:×]\s*(\d+)$/i);
+  if (m) {
+    const w = parseInt(m[1], 10), h = parseInt(m[2], 10);
+    if (w > 0 && h > 0) {
+      const r = w / h;
+      // 归一到 mgate 文档支持的几个比例
+      if (Math.abs(r - 1) < 0.05) return '1:1';
+      if (Math.abs(r - 16 / 9) < 0.1) return '16:9';
+      if (Math.abs(r - 9 / 16) < 0.1) return '9:16';
+      if (Math.abs(r - 4 / 3) < 0.1) return '4:3';
+      if (Math.abs(r - 3 / 4) < 0.1) return '3:4';
+      if (Math.abs(r - 21 / 9) < 0.15) return '21:9';
+      if (Math.abs(r - 2 / 3) < 0.05) return '2:3';
+      if (Math.abs(r - 3 / 2) < 0.05) return '3:2';
+    }
+  }
+  // 直接传 "16:9" 这种格式时直接放行
+  if (/^\d+:\d+$/.test(String(size))) return String(size);
+  return null;
+}
+
 // 通义万象：支持参考图（角色/场景），content 为 [text, image, image, ...]；本地调试时参考图可转 base64
 // 通义千问 qwen-image：仅支持 content 中一个 text，用同步接口，parameters 不含 stream/enable_interleave
 async function callDashScopeImageApi(config, log, opts) {
@@ -1456,6 +1626,13 @@ async function _callImageApi(db, log, opts) {
       files_base_url: opts.files_base_url,
       storage_local_path: opts.storage_local_path,
       system_prompt: opts.system_prompt,
+    });
+  }
+
+  if (protocol === 'modelgate') {
+    return callModelGateImageApi(config, log, {
+      prompt: effectivePrompt, model, size, image_gen_id,
+      reference_image_urls: opts.reference_image_urls,
     });
   }
 

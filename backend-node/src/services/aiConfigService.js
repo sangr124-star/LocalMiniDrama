@@ -259,6 +259,35 @@ async function testConnection(opts) {
     return;
   }
 
+  // --- ModelGate (mgate.zhiqungj.com) ---
+  // 用 list_asset_groups 做轻量探针：调一次基本不会扣费，401=AK 无效 / SK 错误，200=联通
+  if (provider === 'modelgate' || provider === 'mgate') {
+    const mgate = require('./mgateClient');
+    // testConnection 调用方传入的 settings 可能是 JSON 字符串（来自前端 form），本地构造一次伪 config
+    const probeConfig = {
+      base_url: base || mgate.DEFAULT_BASE_URL,
+      api_key: opts.api_key || '',
+      settings: opts.settings || '',
+    };
+    if (!mgate.resolveSecretKey(probeConfig)) {
+      throw new Error('Secret Key 未配置（请在「高级设置」中以 settings JSON 填入 secret_key）');
+    }
+    let resp;
+    try {
+      resp = await mgate.postJson(probeConfig, '/ai_router/list_asset_groups', {
+        Filter: { GroupType: 'AIGC' }, PageNumber: 1, PageSize: 1,
+      }, { timeoutMs: 15000 });
+    } catch (e) {
+      throw new Error('mgate 连通失败: ' + e.message);
+    }
+    if (resp.statusCode === 401 || resp.statusCode === 403) {
+      const msg = resp.body?.error?.message || resp.body?.message || `(${resp.statusCode})`;
+      throw new Error('mgate 鉴权失败: ' + msg);
+    }
+    // 其他状态码（200 / 400 等业务错误）说明 AK + 签名都已通过
+    return;
+  }
+
   // --- Gemini ---
   if (provider === 'gemini' || provider === 'google') {
     endpoint = endpoint || '/v1beta/models/{model}:generateContent';

@@ -328,6 +328,7 @@
             <el-option label="可灵 Omni-Video（官方 api-beijing / ffir 中转，O1 全能）" value="kling_omni" />
             <el-option label="xAI Grok Imagine（官方 prompt + aspect_ratio，/v1/videos/generations）" value="xai" />
             <el-option label="NanoBanana" value="nano_banana" />
+            <el-option label="ModelGate AI 网关（HMAC 签名，OG 图 / Seedance 2.0 视频）" value="modelgate" />
           </el-select>
         </el-form-item>
 
@@ -612,6 +613,23 @@ input_reference = (图片文件，可选)</pre>
               <code>/kling/v1/videos/omni-video</code> 与
               <code>/kling/v1/images/omni-image/{taskId}</code>。详见
               <a href="https://klingai.com/document-api/apiReference/model/OmniVideo" target="_blank" rel="noopener noreferrer">OmniVideo</a>。
+            </p>
+          </el-form-item>
+        </template>
+        <!-- ModelGate 专属：Secret Key（HMAC-SHA256 签名用） -->
+        <template v-if="form.api_protocol === 'modelgate' || (form.provider === 'modelgate' || form.provider === 'mgate')">
+          <el-form-item>
+            <template #label><span class="form-label-tip">Secret Key</span></template>
+            <el-input
+              v-model="form.mgate_secret_key"
+              type="password"
+              show-password
+              placeholder="ModelGate Secret Key（sk_xxx，与 API Key 成对）"
+              autocomplete="off"
+            />
+            <p class="field-tip">
+              ModelGate 使用 <code>HMAC-SHA256(secret_key, timestamp + "\n" + raw_body)</code> 签名。
+              上方 API Key 填 <code>ak_xxx</code>，此处填配套的 <code>sk_xxx</code>。两者同时必填。
             </p>
           </el-form-item>
         </template>
@@ -1154,6 +1172,8 @@ const form = ref({
   kling_access_key: '',
   kling_secret_key: '',
   kling_secret_key_base64: false,
+  // ModelGate 网关 Secret Key（存 settings.secret_key，后端 HMAC 签名用）
+  mgate_secret_key: '',
   // TTS 专属字段
   voice_id: '',
   group_id: '',
@@ -1270,6 +1290,7 @@ const providerConfigs = {
     { id: 'volcengine', name: '火山引擎', models: ['doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828'] },
     { id: 'kling', name: '可灵 Kling', models: ['kling-image', 'kling-omni-image'] },
     { id: 'nano_banana', name: 'NanoBanana', models: ['nano-banana-2', 'nano-banana-pro', 'nano-banana'] },
+    { id: 'modelgate', name: 'ModelGate 网关', models: ['image2_low', 'image2_medium', 'gem-3.0', 'gem-3.1'] },
     // { id: 'chatfire', name: 'Chatfire', models: ['nano-banana-pro', 'doubao-seedream-4-5-251128', 'qwen-image'] },
     { id: 'gemini', name: 'Google Gemini', models: ['gemini-2.5-flash-image', 'gemini-2.5-flash-image-preview', 'gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview'] },
     { id: 'openai', name: 'OpenAI', models: ['dall-e-3', 'dall-e-2'] },
@@ -1291,6 +1312,7 @@ const providerConfigs = {
     { id: 'kling', name: '可灵 Kling', models: ['kling-omni-video', 'kling-video', 'kling-motion-control'] },
     { id: 'vidu', name: 'Vidu', models: ['viduq2', 'viduq2-pro', 'viduq2-turbo', 'viduq3-pro'] },
     { id: 'volces', name: '火山引擎', models: ['doubao-seedance-2-0-260128', 'doubao-seedance-2-0-fast-260128', 'doubao-seedance-1-5-pro-251215', 'doubao-seedance-1-0-lite-i2v-250428', 'doubao-seedance-1-0-lite-t2v-250428', 'doubao-seedance-1-0-pro-250528', 'doubao-seedance-1-0-pro-fast-251015'] },
+    { id: 'modelgate', name: 'ModelGate 网关', models: ['doubao-seedance-2-0-260128', 'doubao-seedance-2-0-fast-260128'] },
     // { id: 'chatfire', name: 'Chatfire', models: ['doubao-seedance-1-5-pro-251215', 'doubao-seedance-1-0-lite-i2v-250428', 'doubao-seedance-1-0-lite-t2v-250428', 'doubao-seedance-1-0-pro-250528', 'doubao-seedance-1-0-pro-fast-251015', 'sora-2', 'sora-2-pro'] },
     { id: 'minimax', name: 'MiniMax 海螺', models: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02'] },
     { id: 'gemini', name: 'Google Gemini (Veo)', models: ['veo-3.1-generate-preview', 'veo-3.0-generate-preview', 'veo-3.0-fast-generate-preview'] },
@@ -1345,6 +1367,8 @@ const providerProtocolMap = {
   deepseek: 'openai',
   jimeng_ai_api: 'jimeng_ai_api',
   jimeng_material_api: '',
+  modelgate: 'modelgate',
+  mgate: 'modelgate',
 }
 
 /** 厂商 id → 默认 Base URL（与参考前端 AIConfigDialog 757-775 一致） */
@@ -1367,6 +1391,7 @@ function getBaseUrlForProvider(provider) {
   if (p === 'jimeng_ai_api') return 'http://127.0.0.1:8000'
   if (p === 'jimeng_material_api') return 'https://silvamux.tingyutech.com'
   if (p === 'xai' || p === 'grok') return 'https://api.x.ai'
+  if (p === 'modelgate' || p === 'mgate') return 'https://mgate.zhiqungj.com'
   return 'https://api.chatfire.site/v1'
 }
 
@@ -1646,6 +1671,7 @@ function resetForm() {
     kling_access_key: '',
     kling_secret_key: '',
     kling_secret_key_base64: false,
+    mgate_secret_key: '',
   }
   formRef.value?.resetFields?.()
 }
@@ -1668,6 +1694,7 @@ function openEdit(row) {
   let kling_access_key = ''
   let kling_secret_key = ''
   let kling_secret_key_base64 = false
+  let mgate_secret_key = ''
   if (row.settings) {
     try {
       const s = JSON.parse(row.settings)
@@ -1681,6 +1708,9 @@ function openEdit(row) {
         kling_access_key = s.kling_access_key || ''
         kling_secret_key = s.kling_secret_key || ''
         kling_secret_key_base64 = !!s.kling_secret_key_base64
+      }
+      if (row.api_protocol === 'modelgate' || (row.provider || '').toLowerCase() === 'modelgate' || (row.provider || '').toLowerCase() === 'mgate') {
+        mgate_secret_key = s.secret_key || s.secretKey || s.SecretKey || ''
       }
     } catch (_) {}
   }
@@ -1704,6 +1734,7 @@ function openEdit(row) {
     kling_access_key,
     kling_secret_key,
     kling_secret_key_base64,
+    mgate_secret_key,
   }
   dialogVisible.value = true
 }
@@ -1744,6 +1775,18 @@ async function submit() {
       else delete baseS.kling_secret_key
       if (form.value.kling_secret_key_base64) baseS.kling_secret_key_base64 = true
       else delete baseS.kling_secret_key_base64
+      settings = Object.keys(baseS).length ? JSON.stringify(baseS) : null
+    } else if (form.value.api_protocol === 'modelgate' || ['modelgate', 'mgate'].includes(String(form.value.provider || '').toLowerCase())) {
+      // ModelGate：把 mgate_secret_key 打包到 settings.secret_key（与现有 settings 合并）
+      let baseS = {}
+      if (editingId.value) {
+        const prev = list.value.find((r) => r.id === editingId.value)
+        if (prev?.settings) {
+          try { baseS = JSON.parse(prev.settings) } catch (_) {}
+        }
+      }
+      if ((form.value.mgate_secret_key || '').trim()) baseS.secret_key = form.value.mgate_secret_key.trim()
+      else delete baseS.secret_key
       settings = Object.keys(baseS).length ? JSON.stringify(baseS) : null
     }
     const payload = {

@@ -24,6 +24,7 @@ function inferVideoProtocol(provider) {
   if (p === 'kling' || p === 'klingai') return 'kling';
   if (p === 'jimeng_ai_api') return 'jimeng_ai_api';
   if (p === 'xai' || p === 'grok') return 'xai';
+  if (p === 'modelgate' || p === 'mgate') return 'modelgate';
   return 'openai';
 }
 
@@ -524,6 +525,141 @@ async function callVolcengineOmniVideoApi(config, log, opts) {
     return { task_id: taskId, status: status || 'processing' };
   }
   return { error: '火山 Seedance 全能未返回 task_id 或 video_url: ' + JSON.stringify(data).slice(0, 300) };
+}
+
+/**
+ * ModelGate（mgate.zhiqungj.com）视频生成 — Seedance 2.0
+ *
+ * 走 OpenAI 风蛇形参数：model + content[] + ratio + duration + generate_audio
+ * 创建：POST /ai_router/video_generations_create   返回 { id: "tk-xxx" }
+ * 查询：POST /ai_router/video_generations_query    成功 status=succeeded, content.video_url
+ *
+ * 入参：prompt + 可选 image_url（首帧图，role=first_frame） / first_frame_url / last_frame_url / reference_urls
+ * 默认带音频（generate_audio: true，按用户要求）
+ *
+ * 返回：{ video_url } 让 caller 自行 download + 回种（与现有架构一致）
+ */
+async function callModelGateVideoApi(config, log, opts) {
+  const mgate = require('./mgateClient');
+  const {
+    prompt,
+    model: preferredModel,
+    duration,
+    aspect_ratio,
+    resolution,
+    seed,
+    watermark,
+    generate_audio,
+    image_url,
+    first_frame_url,
+    last_frame_url,
+    reference_urls,
+    video_gen_id,
+  } = opts;
+
+  const model = getModelFromConfig(config, preferredModel) || 'doubao-seedance-2-0-260128';
+  const ratio = aspect_ratio || '16:9';
+  // mgate Seedance 2.0 支持 4-15 秒（文档 4.3）
+  let dur = Number(duration);
+  if (!Number.isFinite(dur) || dur < 1) dur = 5;
+  if (dur < 4) dur = 4;
+  if (dur > 15) dur = 15;
+
+  // 拼装 content[]：先 text，再首/尾帧 / reference_image
+  const content = [{ type: 'text', text: (prompt || '').trim() }];
+  const ff = (first_frame_url || image_url || '').trim();
+  const lf = (last_frame_url || '').trim();
+  if (ff && /^https?:\/\//i.test(ff)) {
+    content.push({ type: 'image_url', image_url: { url: ff }, role: 'first_frame' });
+  }
+  if (lf && /^https?:\/\//i.test(lf)) {
+    content.push({ type: 'image_url', image_url: { url: lf }, role: 'last_frame' });
+  }
+  // 多模态参考图（仅当未指定首/尾帧时使用，避免与首帧模式冲突）
+  if (!ff && !lf && Array.isArray(reference_urls)) {
+    const refs = reference_urls.filter((u) => u && /^https?:\/\//i.test(u)).slice(0, 9);
+    for (const u of refs) {
+      content.push({ type: 'image_url', image_url: { url: u }, role: 'reference_image' });
+    }
+  }
+
+  const body = {
+    model,
+    content,
+    ratio,
+    duration: dur,
+    watermark: watermark != null ? Boolean(watermark) : false,
+    // 默认带音频（用户明确要求）；caller 显式传 false 才关闭
+    generate_audio: generate_audio != null ? Boolean(generate_audio) : true,
+  };
+  if (resolution) body.resolution = resolution;
+  if (seed != null) body.seed = Number(seed);
+
+  log.info('[mgate-vid] 创建任务', {
+    video_gen_id, model, ratio, duration: dur,
+    generate_audio: body.generate_audio,
+    content_types: content.map((c) => c.type + (c.role ? `(${c.role})` : '')),
+    prompt_head: ((prompt || '').trim()).slice(0, 120),
+  });
+
+  let createResp;
+  try {
+    createResp = await mgate.postJson(config, '/ai_router/video_generations_create', body);
+  } catch (e) {
+    log.error('[mgate-vid] 创建网络异常', { video_gen_id, error: e.message });
+    return { error: 'mgate 视频创建网络异常: ' + e.message };
+  }
+  if (createResp.statusCode < 200 || createResp.statusCode >= 300) {
+    const errMsg =
+      (createResp.body && (createResp.body.error?.message || createResp.body.message)) ||
+      createResp.raw.slice(0, 300);
+    log.error('[mgate-vid] 创建失败', { video_gen_id, status: createResp.statusCode, errMsg });
+    return { error: `mgate 视频创建失败 (${createResp.statusCode}): ${errMsg}` };
+  }
+  const taskId = createResp.body?.id || createResp.body?.Response?.TaskId || createResp.body?.task_id;
+  if (!taskId) {
+    log.error('[mgate-vid] 未拿到 task id', { video_gen_id, raw: createResp.raw.slice(0, 300) });
+    return { error: 'mgate 视频创建未返回 id: ' + createResp.raw.slice(0, 200) };
+  }
+
+  // 轮询：5s × 240 = 20min（实测 5s/720p 视频 ~2.5min；更长/更高分辨率留余量）
+  const queryFn = () => mgate.postJson(config, '/ai_router/video_generations_query', { task_id: taskId });
+  const result = await mgate.pollUntilDone(queryFn, {
+    maxAttempts: 240,
+    intervalMs: 5000,
+    onTick: (i, body) => {
+      const st = body?.status || body?.Response?.Status;
+      if (i === 1 || i % 12 === 0) {
+        log.info('[mgate-vid] 轮询', { video_gen_id, task_id: taskId, attempt: i, status: st });
+      }
+    },
+    isDone: (body) => {
+      const st = body?.status || body?.Response?.Status;
+      return st === 'succeeded' || st === 'FINISH';
+    },
+    isFailed: (body) => {
+      const st = body?.status || body?.Response?.Status;
+      if (st === 'failed' || st === 'cancelled' || st === 'expired' || st === 'ABORTED') {
+        const msg = body?.error?.message || body?.Response?.AigcVideoTask?.Message || st;
+        return `mgate 视频任务失败 (${st}): ${msg}`;
+      }
+      return false;
+    },
+  });
+  if (!result.ok) {
+    log.error('[mgate-vid] 任务失败/超时', { video_gen_id, error: result.error });
+    return { error: result.error };
+  }
+  const b = result.body || {};
+  const videoUrl =
+    b.content?.video_url ||
+    b.Response?.AigcVideoTask?.Output?.FileInfos?.[0]?.FileUrl;
+  if (!videoUrl) {
+    log.error('[mgate-vid] 任务完成但无视频 URL', { video_gen_id, body_head: JSON.stringify(b).slice(0, 500) });
+    return { error: 'mgate 视频任务完成但未返回 video_url' };
+  }
+  log.info('[mgate-vid] 任务完成', { video_gen_id, task_id: taskId, url_head: String(videoUrl).slice(0, 100) });
+  return { video_url: videoUrl };
 }
 
 /**
@@ -2776,6 +2912,24 @@ async function callVideoApi(db, log, opts) {
       reference_urls: opts.reference_urls,
       files_base_url: opts.files_base_url,
       storage_local_path: opts.storage_local_path,
+      video_gen_id: opts.video_gen_id,
+    });
+  }
+
+  if (protocol === 'modelgate') {
+    return callModelGateVideoApi(config, log, {
+      prompt,
+      model,
+      duration: opts.duration,
+      aspect_ratio,
+      resolution: opts.resolution,
+      seed: opts.seed,
+      watermark: opts.watermark,
+      generate_audio: opts.generate_audio,
+      image_url: opts.image_url,
+      first_frame_url: opts.first_frame_url,
+      last_frame_url: opts.last_frame_url,
+      reference_urls: opts.reference_urls,
       video_gen_id: opts.video_gen_id,
     });
   }
