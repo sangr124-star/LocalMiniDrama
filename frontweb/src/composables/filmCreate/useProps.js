@@ -58,6 +58,8 @@ export function useProps(deps) {
   // 批量生成状态
   const batchPropGenPool = createBatchPool({ concurrency: 5 })
   const batchPropErrors = ref([])
+  const batchPropTimer = useElapsedTimer()
+  function batchPropGenElapsedText() { return batchPropTimer.text('prop-gen') }
 
   // ── 道具库状态 ────────────────────────────────────────
   const showPropLibrary = ref(false)
@@ -320,6 +322,7 @@ export function useProps(deps) {
 
     batchPropErrors.value = []
     batchPropGenPool.setItems(todo)
+    batchPropTimer.start('prop-gen')
 
     await batchPropGenPool.run(
       async (prop) => {
@@ -362,6 +365,7 @@ export function useProps(deps) {
       if (failed === 0) ElMessage.success(`道具批量生成完成（共 ${total} 条）`)
       else ElMessage.warning(`批量完成，${failed}/${total} 条失败`)
     }
+    batchPropTimer.stop('prop-gen')
   }
 
   function onBatchGeneratePropsStop() {
@@ -593,5 +597,6 @@ export function useProps(deps) {
     doExtractFromRef2,
     onBatchGenerateProps,
     onBatchGeneratePropsStop,
+    batchPropGenElapsedText,
   }
 }

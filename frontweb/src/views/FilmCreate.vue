@@ -425,12 +425,14 @@
                 <div v-if="batchCharGenRunning" class="batch-progress">
                   <el-icon class="is-loading"><Loading /></el-icon>
                   <span>生成图片：{{ batchCharGenDone }}/{{ batchCharGenTotal }}</span>
+                  <span v-if="batchCharGenElapsedText()" class="batch-elapsed">（已 {{ batchCharGenElapsedText() }}）</span>
                   <span v-if="batchCharGenFailed > 0" class="batch-failed">{{ batchCharGenFailed }} 条失败</span>
                   <span v-if="batchCharGenStopping" class="batch-stopping">（正在停止...）</span>
                 </div>
                 <div v-if="batchCharReviewRunning || batchCharReviewEnqueued > 0" class="batch-progress">
                   <el-icon v-if="batchCharReviewRunning" class="is-loading"><Loading /></el-icon>
                   <span>SD2 审核：{{ batchCharReviewDone }}/{{ batchCharReviewEnqueued }}</span>
+                  <span v-if="batchCharReviewRunning && batchCharReviewElapsedText()" class="batch-elapsed">（已 {{ batchCharReviewElapsedText() }}）</span>
                   <span v-if="batchCharReviewFailed > 0" class="batch-failed">{{ batchCharReviewFailed }} 条失败</span>
                 </div>
                 <div v-if="batchCharErrors.length > 0" class="batch-error-log">
@@ -627,6 +629,7 @@
                 <div v-if="batchPropGenRunning" class="batch-progress">
                   <el-icon class="is-loading"><Loading /></el-icon>
                   <span>生成图片：{{ batchPropGenDone }}/{{ batchPropGenTotal }}</span>
+                  <span v-if="batchPropGenElapsedText()" class="batch-elapsed">（已 {{ batchPropGenElapsedText() }}）</span>
                   <span v-if="batchPropGenFailed > 0" class="batch-failed">{{ batchPropGenFailed }} 条失败</span>
                   <span v-if="batchPropGenStopping" class="batch-stopping">（正在停止...）</span>
                 </div>
@@ -734,6 +737,7 @@
                 <div v-if="batchSceneGenRunning" class="batch-progress">
                   <el-icon class="is-loading"><Loading /></el-icon>
                   <span>生成图片：{{ batchSceneGenDone }}/{{ batchSceneGenTotal }}</span>
+                  <span v-if="batchSceneGenElapsedText()" class="batch-elapsed">（已 {{ batchSceneGenElapsedText() }}）</span>
                   <span v-if="batchSceneGenFailed > 0" class="batch-failed">{{ batchSceneGenFailed }} 条失败</span>
                   <span v-if="batchSceneGenStopping" class="batch-stopping">（正在停止...）</span>
                 </div>
@@ -934,17 +938,20 @@
           <div v-if="batchImageRunning" class="batch-progress">
             <el-icon class="is-loading"><Loading /></el-icon>
             <span>批量生成分镜图：{{ batchImageProgress.current }}/{{ batchImageProgress.total }}</span>
+            <span v-if="batchElapsed('batch-image')" class="batch-elapsed">（已 {{ batchElapsed('batch-image') }}）</span>
             <span v-if="batchImageProgress.failed > 0" class="batch-failed">{{ batchImageProgress.failed }} 条失败</span>
             <span v-if="batchImageStopping" class="batch-stopping">（正在停止...）</span>
           </div>
           <div v-if="batchSbReviewRunning || batchSbReviewEnqueued > 0" class="batch-progress">
             <el-icon v-if="batchSbReviewRunning" class="is-loading"><Loading /></el-icon>
             <span>SD2 审核：{{ batchSbReviewDone }}/{{ batchSbReviewEnqueued }}</span>
+            <span v-if="batchSbReviewRunning && batchElapsed('batch-sb-review')" class="batch-elapsed">（已 {{ batchElapsed('batch-sb-review') }}）</span>
             <span v-if="batchSbReviewFailed > 0" class="batch-failed">{{ batchSbReviewFailed }} 条失败</span>
           </div>
           <div v-if="batchVideoRunning" class="batch-progress">
             <el-icon class="is-loading"><Loading /></el-icon>
             <span>批量生成分镜视频：{{ batchVideoProgress.current }}/{{ batchVideoProgress.total }}</span>
+            <span v-if="batchElapsed('batch-video')" class="batch-elapsed">（已 {{ batchElapsed('batch-video') }}）</span>
             <span v-if="batchVideoProgress.failed > 0" class="batch-failed">{{ batchVideoProgress.failed }} 条失败</span>
             <span v-if="batchVideoStopping" class="batch-stopping">（正在停止...）</span>
           </div>
@@ -2607,6 +2614,9 @@ const storyboardGenerating = ref(false)
 // 分镜生成耗时计时器（用户多次反馈"非常慢"，加实时计时让等待感变可控）
 const storyboardGenTimer = useElapsedTimer()
 function storyboardGenElapsed() { return storyboardGenTimer.text('sb-gen') }
+// 批量任务统一计时器（key 为任务名）
+const batchTimer = useElapsedTimer()
+function batchElapsed(key) { return batchTimer.text(key) }
 /** 分镜批量生成结束后，按镜序逐个润色全能片段（仅勾选全能模式且各镜为 universal 且有正文时） */
 const universalOmniPolishRunning = ref(false)
 const universalOmniPolishProgress = ref({ current: 0, total: 0, label: '' })
@@ -2693,6 +2703,7 @@ const {
   onSd2CertifyRefresh, openCharSd2CertDialog, onSd2CertifyBatch,
   onBatchGenerateAndReview: onBatchGenCharAndReview,
   onBatchGenerateAndReviewStop: onBatchGenCharAndReviewStop,
+  batchCharGenElapsedText, batchCharReviewElapsedText,
   charSd2BadgeText, charSd2BadgeTitle,
   onAddCharFromLibrary,
   charImageElapsedText,
@@ -2714,7 +2725,7 @@ const {
   onClosePropDialog, onDeleteProp, onGeneratePropImage,
   loadPropLibraryList, debouncedLoadPropLibrary, openEditPropLibrary, submitEditPropLibrary,
   onDeletePropLibrary, onAddPropToLibrary, onAddPropToMaterialLibrary, onAddPropFromLibrary,
-  doExtractFromRef2, onBatchGenerateProps, onBatchGeneratePropsStop,
+  doExtractFromRef2, onBatchGenerateProps, onBatchGeneratePropsStop, batchPropGenElapsedText,
   propImageElapsedText,
 } = usePropsComposable({ store, dramaId, currentEpisodeId, getSelectedStyle, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage })
 
@@ -2733,7 +2744,7 @@ const {
   onCloseSceneDialog, onDeleteScene, onGenerateSceneImage,
   loadSceneLibraryList, debouncedLoadSceneLibrary, openEditSceneLibrary, submitEditSceneLibrary,
   onDeleteSceneLibrary, onAddSceneToLibrary, onAddSceneToMaterialLibrary, onAddSceneFromLibrary,
-  onBatchGenerateScenes, onBatchGenerateScenesStop,
+  onBatchGenerateScenes, onBatchGenerateScenesStop, batchSceneGenElapsedText,
   sceneImageElapsedText,
 } = useScenes({ store, dramaId, currentEpisodeId, getSelectedStyle, scriptLanguage, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage, dramaAPI })
 
@@ -5474,6 +5485,8 @@ async function startBatchImageGeneration() {
   batchSbReviewErrors.value = []
   batchImageStopping.value = false
   batchImageRunning.value = true
+  batchTimer.start('batch-image')
+  batchTimer.start('batch-sb-review')
   try {
     // 仅当媒体数据尚未加载时才全量拉取，避免点击时触发大量冗余请求
     if (Object.keys(sbImages.value).length === 0) {
@@ -5568,6 +5581,8 @@ async function startBatchImageGeneration() {
     }
   } finally {
     batchImageRunning.value = false
+    batchTimer.stop('batch-image')
+    batchTimer.stop('batch-sb-review')
   }
 }
 
@@ -5576,6 +5591,7 @@ async function startBatchVideoGeneration() {
   batchVideoErrors.value = []
   batchVideoStopping.value = false
   batchVideoRunning.value = true
+  batchTimer.start('batch-video')
   try {
     // 仅当媒体数据尚未加载时才全量拉取，避免点击时触发大量冗余请求
     if (Object.keys(sbVideos.value).length === 0) {
@@ -5700,6 +5716,7 @@ async function startBatchVideoGeneration() {
     }
   } finally {
     batchVideoRunning.value = false
+    batchTimer.stop('batch-video')
   }
 }
 
@@ -7443,6 +7460,10 @@ html.light .section-title { color: #1e1b4b; }
 }
 .batch-stopping {
   color: var(--el-color-warning);
+  font-size: 12px;
+}
+.batch-elapsed {
+  color: var(--el-text-color-secondary);
   font-size: 12px;
 }
 .batch-error-log {

@@ -77,6 +77,9 @@ export function useCharacters(deps) {
   const batchCharReviewPipe = createReviewPipeline({ concurrency: 5 })
   const batchCharErrors = ref([])           // 生成失败记录（[{name, error}]）
   const batchCharReviewErrors = ref([])     // 审核失败记录（[{name, error}]）
+  const batchCharTimer = useElapsedTimer()  // 批量计时器（生成池 + 审核池共用）
+  function batchCharGenElapsedText() { return batchCharTimer.text('char-gen') }
+  function batchCharReviewElapsedText() { return batchCharTimer.text('char-review') }
   let charLibraryKeywordTimer = null
 
   // ── 常量 ──────────────────────────────────────────────
@@ -563,6 +566,8 @@ export function useCharacters(deps) {
     batchCharErrors.value = []
     batchCharReviewErrors.value = []
     batchCharGenPool.setItems(todo)
+    batchCharTimer.start('char-gen')
+    batchCharTimer.start('char-review')
 
     // 启动审核池：消费来自生成池的 char_id
     batchCharReviewPipe.start(
@@ -640,6 +645,8 @@ export function useCharacters(deps) {
         ElMessage.warning(`批量完成：生成 ${genTotal - genFailed}/${genTotal}，审核 ${revTotal - revFailed}/${revTotal}`)
       }
     }
+    batchCharTimer.stop('char-gen')
+    batchCharTimer.stop('char-review')
   }
 
   /** 停止批量生成（含审核）：未出队的丢弃，已在跑的等结束 */
@@ -807,6 +814,8 @@ export function useCharacters(deps) {
     onSd2CertifyBatch,
     onBatchGenerateAndReview,
     onBatchGenerateAndReviewStop,
+    batchCharGenElapsedText,
+    batchCharReviewElapsedText,
     charSd2BadgeText,
     charSd2BadgeTitle,
     onAddCharFromLibrary,

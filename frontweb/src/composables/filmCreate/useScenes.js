@@ -51,6 +51,8 @@ export function useScenes(deps) {
   // 批量生成状态
   const batchSceneGenPool = createBatchPool({ concurrency: 5 })
   const batchSceneErrors = ref([])
+  const batchSceneTimer = useElapsedTimer()
+  function batchSceneGenElapsedText() { return batchSceneTimer.text('scene-gen') }
 
   // ── 场景库状态 ────────────────────────────────────────
   const showSceneLibrary = ref(false)
@@ -459,6 +461,7 @@ export function useScenes(deps) {
 
     batchSceneErrors.value = []
     batchSceneGenPool.setItems(todo)
+    batchSceneTimer.start('scene-gen')
 
     await batchSceneGenPool.run(
       async (scene) => {
@@ -505,6 +508,7 @@ export function useScenes(deps) {
       if (failed === 0) ElMessage.success(`场景批量生成完成（共 ${total} 条）`)
       else ElMessage.warning(`批量完成，${failed}/${total} 条失败`)
     }
+    batchSceneTimer.stop('scene-gen')
   }
 
   function onBatchGenerateScenesStop() {
@@ -569,5 +573,6 @@ export function useScenes(deps) {
     onAddSceneFromLibrary,
     onBatchGenerateScenes,
     onBatchGenerateScenesStop,
+    batchSceneGenElapsedText,
   }
 }
