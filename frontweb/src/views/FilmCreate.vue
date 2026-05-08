@@ -1487,16 +1487,14 @@
                   </el-button>
                 </el-tooltip>
               </div>
-              <template v-if="isSuperAdmin">
-                <div class="sb-video-prompt-label">
-                  <span class="sb-dot"></span>
-                  <span>经典视频提示词</span>
-                </div>
-                <div class="sb-video-params-bar">
-                  <span class="sb-video-prompt-text sb-video-prompt-text--preview">{{ sb.video_prompt || '暂无视频提示词' }}</span>
-                  <el-button size="small" link type="primary" @click="onOpenSbPromptDialog(sb)">手工编辑</el-button>
-                </div>
-              </template>
+              <div class="sb-video-prompt-label">
+                <span class="sb-dot"></span>
+                <span>经典视频提示词</span>
+              </div>
+              <div class="sb-video-params-bar">
+                <span class="sb-video-prompt-text sb-video-prompt-text--preview">{{ sb.video_prompt || '暂无视频提示词' }}</span>
+                <el-button size="small" link type="primary" @click="onOpenSbPromptDialog(sb)">手工编辑</el-button>
+              </div>
             </div>
           </div>
           </template>
@@ -2173,9 +2171,8 @@
       </template>
     </el-dialog>
 
-    <!-- 分镜提示词编辑弹窗（仅 super_admin 可见 + 可触发） -->
+    <!-- 分镜提示词编辑弹窗（含图片+视频提示词，所有用户可见，便于命中审核时手改） -->
     <el-dialog
-      v-if="isSuperAdmin"
       v-model="showSbPromptDialog"
       :title="`分镜 ${sbPromptTarget?.storyboard_number ?? ''} · 编辑提示词`"
       width="700px"
@@ -2391,7 +2388,7 @@
         <el-form-item label="画面结果">
           <el-input v-model="sbResult[videoParamsTarget.id]" type="textarea" :rows="2" placeholder="动作完成后的画面结果" />
         </el-form-item>
-        <el-form-item v-if="isSuperAdmin" label="视频提示词">
+        <el-form-item label="视频提示词">
           <el-input
             :model-value="buildVideoPromptFromFields(videoParamsTarget.id)"
             type="textarea"
