@@ -17,3 +17,4 @@ desktop/backend-app-secure/configs/config.yaml
 .DS_Store
 backend-node/deploy-pack
 backend-node/keys/
+.claude/
