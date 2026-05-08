@@ -981,13 +981,42 @@ async function callModelGateImageApi(config, log, opts) {
     log.error('[mgate-img] 任务失败/超时', { image_gen_id, error: result.error });
     return { error: result.error };
   }
-  const r = result.body?.Response || result.body || {};
-  const fileUrl =
-    r.AigcImageTask?.Output?.FileInfos?.[0]?.FileUrl ||
-    r.ImageUrls?.[0] ||
-    r.Output?.FileInfos?.[0]?.FileUrl;
+
+  /** 从 query response 抽 FileUrl（兼容三种字段位置）*/
+  function pickFileUrl(body) {
+    const rr = body?.Response || body || {};
+    return (
+      rr.AigcImageTask?.Output?.FileInfos?.[0]?.FileUrl ||
+      rr.ImageUrls?.[0] ||
+      rr.Output?.FileInfos?.[0]?.FileUrl ||
+      null
+    );
+  }
+
+  let fileUrl = pickFileUrl(result.body);
+
+  // 上游 race condition：Status=FINISH 但 Output 还没填好。再轮询几次等它补上
   if (!fileUrl) {
-    log.error('[mgate-img] 任务完成但无图片 URL', { image_gen_id, body_head: JSON.stringify(result.body).slice(0, 400) });
+    log.warn('[mgate-img] FINISH 但 FileUrl 缺失，进入 fallback 轮询', { image_gen_id, task_id: taskId });
+    for (let i = 1; i <= 3; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      try {
+        const retryResp = await queryFn();
+        if (retryResp.statusCode >= 200 && retryResp.statusCode < 300) {
+          fileUrl = pickFileUrl(retryResp.body);
+          if (fileUrl) {
+            log.info('[mgate-img] fallback 拿到 FileUrl', { image_gen_id, task_id: taskId, attempt: i });
+            break;
+          }
+        }
+      } catch (e) {
+        log.warn('[mgate-img] fallback 轮询异常', { image_gen_id, task_id: taskId, attempt: i, error: e.message });
+      }
+    }
+  }
+
+  if (!fileUrl) {
+    log.error('[mgate-img] 任务完成但无图片 URL（fallback 也未拿到）', { image_gen_id, body_head: JSON.stringify(result.body).slice(0, 400) });
     return { error: 'mgate 图片任务完成但未返回 FileUrl' };
   }
   log.info('[mgate-img] 任务完成', { image_gen_id, task_id: taskId, url_head: String(fileUrl).slice(0, 100) });
