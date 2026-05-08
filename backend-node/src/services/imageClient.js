@@ -945,10 +945,42 @@ async function callModelGateImageApi(config, log, opts) {
     return { error: 'mgate 图片创建未返回 TaskId: ' + createResp.raw.slice(0, 200) };
   }
 
-  // 轮询：5s × 60 = 5min（OG image2_low 实测 ~35s）
+  // 轮询：5s × 120 = 10min（OG image2_low 实测 35-90s，但 mgate 偶发 5-6min 才出，给足余量）
   const queryFn = () => mgate.postJson(config, '/ai_router/image_generations_query', { task_id: taskId });
+
+  /** 把 mgate / Azure 原始错误信息翻译成对用户友好的中文提示 */
+  function translateMgateImageError(rawMsg) {
+    const s = String(rawMsg || '');
+    if (!s) return '';
+
+    // Azure GPT image safety system 拒绝
+    if (/safety_violations/i.test(s) || /moderation_blocked/i.test(s) || /rejected by the safety system/i.test(s)) {
+      const tags = [];
+      if (/violence/i.test(s)) tags.push('暴力');
+      if (/sexual/i.test(s)) tags.push('色情');
+      if (/hate/i.test(s)) tags.push('仇恨');
+      if (/self[-_ ]?harm|self_harm/i.test(s)) tags.push('自残');
+      if (/minors?|child/i.test(s)) tags.push('未成年');
+      const tagStr = tags.length ? `（涉及：${tags.join('、')}）` : '';
+      return `提示词触发了上游内容安全审核${tagStr}，请修改后重试 — 避免暴力、色情、仇恨、自残等敏感词`;
+    }
+    // 火山豆包侧的内容审核
+    if (/InputTextSensitiveContentDetected|OutputImageSensitiveContentDetected|PolicyViolation|content[_ -]?policy|policy[_ -]?violation/i.test(s)) {
+      return '提示词或参考图触发了内容安全审核，请修改后重试';
+    }
+    // 配额 / 限流
+    if (/quota|limit|rate/i.test(s) && /(exceed|reach|too many)/i.test(s)) {
+      return '上游配额或并发已达上限，请稍后重试';
+    }
+    // 网络/上游服务
+    if (/timeout|deadline/i.test(s)) return '上游处理超时，请重试';
+    if (/connection|network/i.test(s)) return '上游网络异常，请重试';
+
+    return s;
+  }
+
   const result = await mgate.pollUntilDone(queryFn, {
-    maxAttempts: 60,
+    maxAttempts: 120,
     intervalMs: 5000,
     onTick: (i, body) => {
       const r = body?.Response || body || {};
@@ -958,27 +990,45 @@ async function callModelGateImageApi(config, log, opts) {
         log.info('[mgate-img] 轮询', { image_gen_id, task_id: taskId, attempt: i, status: st, progress });
       }
     },
+    /** 真成功：外层 FINISH + 内层 ErrCode=0；FINISH 但 ErrCode!=0 是 mgate 的"成功外壳，失败内核" */
     isDone: (body) => {
       const r = body?.Response || body || {};
       const st = r.Status || r.status;
-      return st === 'FINISH' || st === 'DONE' || st === 'succeeded';
+      const aigcSt = r.AigcImageTask?.Status;
+      const errCode = r.AigcImageTask?.ErrCode ?? 0;
+      if (st === 'FINISH' || st === 'DONE' || st === 'succeeded') {
+        // 内层 AigcImageTask 也要标记成功才算真完成
+        if (errCode === 0 && (!aigcSt || aigcSt === 'FINISH' || aigcSt === 'DONE' || aigcSt === 'succeeded')) {
+          return true;
+        }
+      }
+      return false;
     },
     isFailed: (body) => {
       const r = body?.Response || body || {};
       const st = r.Status || r.status;
+      const aigcSt = r.AigcImageTask?.Status;
       const errCode = r.AigcImageTask?.ErrCode ?? 0;
-      if (st === 'FAIL' || st === 'failed' || st === 'ABORTED') {
-        const msg = r.AigcImageTask?.Message || r.Message || r.error?.message || '未知失败';
-        return `mgate 图片任务失败: ${msg}`;
+      const rawMsg = r.AigcImageTask?.Message || r.Message || r.error?.message || '';
+
+      // 外层 FAIL / 内层 FAIL / ErrCode != 0 都算失败
+      if (st === 'FAIL' || st === 'failed' || st === 'ABORTED' || aigcSt === 'FAIL' || aigcSt === 'failed' || aigcSt === 'ABORTED') {
+        const friendly = translateMgateImageError(rawMsg) || '未知失败';
+        return friendly;
       }
       if (errCode && errCode !== 0) {
-        return `mgate 图片任务 ErrCode=${errCode}: ${r.AigcImageTask?.Message || ''}`;
+        const friendly = translateMgateImageError(rawMsg);
+        return friendly || `任务失败 (代码 ${errCode})`;
       }
       return false;
     },
   });
   if (!result.ok) {
     log.error('[mgate-img] 任务失败/超时', { image_gen_id, error: result.error });
+    // 超时报错改写得更友好；非超时（比如内容审核）保留 friendly translation
+    if (/任务轮询超时/.test(result.error || '')) {
+      return { error: '上游处理超过 10 分钟仍未返回，可能因图生服务繁忙，请稍后重试' };
+    }
     return { error: result.error };
   }
 
@@ -1017,7 +1067,7 @@ async function callModelGateImageApi(config, log, opts) {
 
   if (!fileUrl) {
     log.error('[mgate-img] 任务完成但无图片 URL（fallback 也未拿到）', { image_gen_id, body_head: JSON.stringify(result.body).slice(0, 400) });
-    return { error: 'mgate 图片任务完成但未返回 FileUrl' };
+    return { error: '上游任务已结束但未返回图片，可能被风控拦截或图床尚未就绪，请稍后重试' };
   }
   log.info('[mgate-img] 任务完成', { image_gen_id, task_id: taskId, url_head: String(fileUrl).slice(0, 100) });
   return { image_url: fileUrl };
