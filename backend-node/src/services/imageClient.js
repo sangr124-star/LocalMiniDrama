@@ -980,7 +980,8 @@ async function callModelGateImageApi(config, log, opts) {
   }
 
   const result = await mgate.pollUntilDone(queryFn, {
-    maxAttempts: 120,
+    // 5s × 180 = 15 分钟。OG 在并发高峰下实测 11 分钟才返回，120 阈值会错杀
+    maxAttempts: 180,
     intervalMs: 5000,
     onTick: (i, body) => {
       const r = body?.Response || body || {};
@@ -1027,7 +1028,7 @@ async function callModelGateImageApi(config, log, opts) {
     log.error('[mgate-img] 任务失败/超时', { image_gen_id, error: result.error });
     // 超时报错改写得更友好；非超时（比如内容审核）保留 friendly translation
     if (/任务轮询超时/.test(result.error || '')) {
-      return { error: '上游处理超过 10 分钟仍未返回，可能因图生服务繁忙，请稍后重试' };
+      return { error: '上游处理超过 15 分钟仍未返回，可能因图生服务繁忙，请稍后重试' };
     }
     return { error: result.error };
   }
