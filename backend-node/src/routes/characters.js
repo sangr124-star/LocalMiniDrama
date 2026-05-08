@@ -285,15 +285,15 @@ function routes(db, cfg, log, uploadService) {
         response.internalError(res, err);
       }
     },
-    /** 即梦素材库 asset 注册（Seedance 2.0 等视频引用 asset://） */
+    /** Seedance 2.0 内容审核 + 角色锁定（mgate 素材库 /ai_router/create_assets） */
     sd2Certify: async (req, res) => {
       try {
-        const out = await characterLibraryService.registerCharacterJimengMaterialAsset(db, log, cfg, req.params.id);
+        const out = await characterLibraryService.registerCharacterMgateAsset(db, log, cfg, req.params.id);
         if (!out.ok) {
           if (out.error === 'character not found') return response.notFound(res, '角色不存在');
           return response.badRequest(res, out.error);
         }
-        response.success(res, { message: 'SD2 素材认证已更新', seedance2_asset: out.seedance2_asset });
+        response.success(res, { message: 'SD2 内容审核已完成', seedance2_asset: out.seedance2_asset });
       } catch (err) {
         log.error('characters sd2-certify', { error: err.message });
         response.internalError(res, err);
@@ -301,14 +301,37 @@ function routes(db, cfg, log, uploadService) {
     },
     sd2CertifyRefresh: async (req, res) => {
       try {
-        const out = await characterLibraryService.refreshCharacterJimengMaterialAsset(db, log, cfg, req.params.id);
+        const out = await characterLibraryService.refreshCharacterMgateAsset(db, log, cfg, req.params.id);
         if (!out.ok) {
           if (out.error === 'character not found') return response.notFound(res, '角色不存在');
           return response.badRequest(res, out.error);
         }
-        response.success(res, { message: '认证状态已刷新', seedance2_asset: out.seedance2_asset });
+        response.success(res, { message: '审核状态已刷新', seedance2_asset: out.seedance2_asset });
       } catch (err) {
         log.error('characters sd2-certify-refresh', { error: err.message });
+        response.internalError(res, err);
+      }
+    },
+    /** 批量审核某剧下所有角色（路径中的 :id 即 drama_id），跳过已 active 的；可选 ?force=1 强制重审 */
+    sd2CertifyBatch: async (req, res) => {
+      try {
+        const dramaId = Number(req.params.id);
+        const force = String(req.query.force || req.body?.force || '0') === '1';
+        if (!Number.isFinite(dramaId) || dramaId <= 0) {
+          return response.badRequest(res, '缺少 drama_id');
+        }
+        const out = await characterLibraryService.batchReviewCharactersMgate(db, log, cfg, dramaId, { force });
+        if (!out.ok) return response.badRequest(res, out.error);
+        const summary = {
+          total: out.results.length,
+          active: out.results.filter((r) => r.status === 'active').length,
+          failed: out.results.filter((r) => r.status === 'failed').length,
+          processing: out.results.filter((r) => r.status === 'processing').length,
+          skipped: out.results.filter((r) => r.skipped).length,
+        };
+        response.success(res, { message: '批量审核已完成', summary, results: out.results });
+      } catch (err) {
+        log.error('characters sd2-certify-batch', { error: err.message });
         response.internalError(res, err);
       }
     },

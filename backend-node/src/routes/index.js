@@ -217,6 +217,8 @@ function setupRouter(cfg, db, log) {
   r.post('/characters/:id/add-to-material-library', requireOwnership('character'), characters.addToMaterialLibrary);
   r.post('/characters/:id/sd2-certify', requireOwnership('character'), characters.sd2Certify);
   r.post('/characters/:id/sd2-certify/refresh', requireOwnership('character'), characters.sd2CertifyRefresh);
+  // 批量审核某剧下所有角色（drama 维度）
+  r.post('/dramas/:id/characters/sd2-certify-batch', requireOwnership('drama'), characters.sd2CertifyBatch);
   r.post('/characters/:id/extract-from-image', requireOwnership('character'), characters.extractFromImage);
   r.post('/characters/:id/extract-anchors', requireOwnership('character'), characters.extractAnchors);
 
@@ -316,6 +318,9 @@ function setupRouter(cfg, db, log) {
   r.post('/storyboards/batch-infer-params', storyboards.batchInferParams);
   r.get('/storyboards/episode/:episode_id/generate', requireOwnership('episode'), storyboards.episodeStoryboardsGenerate);
   r.post('/storyboards/:id/insert-before', requireOwnership('storyboard'), storyboards.insertBefore);
+  // Seedance 2.0 内容审核（mgate 素材库）：单审 + drama 维度批量
+  r.post('/storyboards/:id/sd2-review', requireOwnership('storyboard'), storyboards.sd2Review);
+  r.post('/dramas/:id/storyboards/sd2-review-batch', requireOwnership('drama'), storyboards.sd2ReviewBatch);
   r.get('/storyboards/:id', requireOwnership('storyboard'), storyboards.getOne);
   r.put('/storyboards/:id', requireOwnership('storyboard'), storyboards.update);
   r.delete('/storyboards/:id', requireOwnership('storyboard'), storyboards.delete);

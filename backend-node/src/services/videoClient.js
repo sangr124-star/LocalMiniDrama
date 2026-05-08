@@ -591,8 +591,9 @@ async function callModelGateVideoApi(config, log, opts) {
     watermark: watermark != null ? Boolean(watermark) : false,
     // 默认带音频（用户明确要求）；caller 显式传 false 才关闭
     generate_audio: generate_audio != null ? Boolean(generate_audio) : true,
+    // 分辨率：caller 未传时默认 720p（豆包 seedance 2.0 默认峰值在 1440p，对成本/速度不友好）
+    resolution: (resolution && String(resolution).trim()) || '720p',
   };
-  if (resolution) body.resolution = resolution;
   if (seed != null) body.seed = Number(seed);
 
   log.info('[mgate-vid] 创建任务', {
@@ -2418,6 +2419,8 @@ async function callXaiVideoApi(config, log, opts) {
 
 /** 支持将角色主图 URL 替换为 seedance2_asset.asset_url（asset://…）的视频协议 */
 const VIDEO_PROTOCOLS_SUPPORT_SD2_ASSET_SCHEME = new Set([
+  // mgate（豆包 Seedance 2.0）— 用 mgate 素材库审核通过后，content[].image_url.url = asset://asset-…
+  'modelgate',
   'volcengine_omni',
   'volcengine',
   'dashscope',
@@ -2607,6 +2610,8 @@ function buildSd2ActiveAssetUrlLookup(db, dramaId, filesBaseUrl, restrictCharact
   for (const row of rows || []) {
     const asset = parseJsonColumnForVideo(row.seedance2_asset);
     if (!asset || String(asset.status || '').toLowerCase() !== 'active') continue;
+    // 仅认 mgate 渠道的 asset_url（旧数据里可能存有即梦 asset，与豆包侧不互通）
+    if (asset.hub_provider && String(asset.hub_provider).toLowerCase() !== 'mgate') continue;
     const uri = normalizeMaterialHubAssetUrlForVideo(asset.asset_url || asset.hub_asset_id);
     if (!uri) continue;
     const certLpRaw = (asset.certified_local_path != null && String(asset.certified_local_path).trim())
@@ -2642,6 +2647,54 @@ function buildSd2ActiveAssetUrlLookup(db, dramaId, filesBaseUrl, restrictCharact
       if (relFromImg) relPathToAsset.set(relFromImg, uri);
     }
   }
+
+  // 同剧下「分镜图本身」的 mgate 审核 active 也并入 lookup —— 视频生成时分镜图会作为 first_frame_url 传入
+  // 数据来自 storyboards.seedance2_review（存的是 image_generations 主图通过审核后的 asset_url）
+  try {
+    const sbRows = db
+      .prepare(
+        `SELECT s.id, s.seedance2_review
+           FROM storyboards s
+           JOIN episodes e ON e.id = s.episode_id
+           WHERE e.drama_id = ? AND s.deleted_at IS NULL AND s.seedance2_review IS NOT NULL`
+      )
+      .all(Number(dramaId));
+    for (const sbRow of sbRows || []) {
+      const review = parseJsonColumnForVideo(sbRow.seedance2_review);
+      if (!review || String(review.status || '').toLowerCase() !== 'active') continue;
+      if (review.hub_provider && String(review.hub_provider).toLowerCase() !== 'mgate') continue;
+      const uri = normalizeMaterialHubAssetUrlForVideo(review.asset_url || review.hub_asset_id);
+      if (!uri) continue;
+
+      // certified_local_path / certified_image_url 是审核时定格的图源（来自 image_generations 主图）
+      const certLpRaw = (review.certified_local_path != null && String(review.certified_local_path).trim())
+        ? String(review.certified_local_path).trim()
+        : '';
+      const certLp = certLpRaw ? normalizeStorageRelativePath(certLpRaw) : '';
+      const certImg = (review.certified_image_url != null && String(review.certified_image_url).trim())
+        ? String(review.certified_image_url).trim()
+        : '';
+
+      const fauxRow = { image_url: certImg, local_path: certLp };
+      for (const k of sd2CandidateUrlKeysForCharacter(fauxRow, filesBaseUrl)) {
+        urlToAsset.set(k, uri);
+      }
+      if (certLp) relPathToAsset.set(certLp, uri);
+      if (certImg) {
+        // 形如 "/static/projects/..." 的相对路径同样可抽出 storage 相对路径
+        if (certImg.startsWith('/static/')) {
+          const rel = normalizeStorageRelativePath(certImg.slice('/static/'.length));
+          if (rel) relPathToAsset.set(rel, uri);
+        } else if (/^https?:\/\//i.test(certImg)) {
+          const relFromCertImg = storageRelativeFromPublicUrl(certImg);
+          if (relFromCertImg) relPathToAsset.set(relFromCertImg, uri);
+        }
+      }
+    }
+  } catch (_) {
+    // 容忍：列不存在 / SQL 异常时仅丢失 storyboard 这部分映射，character 部分仍可用
+  }
+
   return { urlToAsset, relPathToAsset };
 }
 

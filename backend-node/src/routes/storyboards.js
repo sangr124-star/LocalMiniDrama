@@ -9,6 +9,7 @@ const promptI18n = require('../services/promptI18n');
 const angleService = require('../services/angleService');
 const { buildUniversalSegmentUserPromptBundle } = require('../services/universalSegmentPromptBundle');
 const { normalizeUniversalSegmentShotDurations } = require('../services/universalSegmentDurationNormalize');
+const storyboardReviewService = require('../services/storyboardReviewService');
 
 /** 润色接口：邻镜结构化摘要（含全能片段与其它提示词字段） */
 function formatNeighborShotPolishContext(row) {
@@ -1046,6 +1047,47 @@ function routes(db, log) {
         response.success(res, { total: rows.length, updated });
       } catch (err) {
         log.error('storyboards batchInferParams', { error: err.message });
+        response.internalError(res, err);
+      }
+    },
+
+    /** Seedance 2.0 内容审核（mgate 素材库）— 单个分镜图 */
+    sd2Review: async (req, res) => {
+      try {
+        const cfg = require('../config').loadConfig();
+        const out = await storyboardReviewService.reviewStoryboardImage(db, log, cfg, req.params.id);
+        if (!out.ok) {
+          if (out.error === 'storyboard not found') return response.notFound(res, '分镜不存在');
+          return response.badRequest(res, out.error);
+        }
+        response.success(res, { message: '分镜审核已完成', seedance2_review: out.seedance2_review });
+      } catch (err) {
+        log.error('storyboards sd2-review', { error: err.message });
+        response.internalError(res, err);
+      }
+    },
+
+    /** 批量审核某剧下所有分镜图（drama 维度） */
+    sd2ReviewBatch: async (req, res) => {
+      try {
+        const cfg = require('../config').loadConfig();
+        const dramaId = Number(req.params.id);
+        const force = String(req.query.force || req.body?.force || '0') === '1';
+        if (!Number.isFinite(dramaId) || dramaId <= 0) {
+          return response.badRequest(res, '缺少 drama_id');
+        }
+        const out = await storyboardReviewService.batchReviewStoryboardsByDrama(db, log, cfg, dramaId, { force });
+        if (!out.ok) return response.badRequest(res, out.error);
+        const summary = {
+          total: out.results.length,
+          active: out.results.filter((r) => r.status === 'active').length,
+          failed: out.results.filter((r) => r.status === 'failed').length,
+          processing: out.results.filter((r) => r.status === 'processing').length,
+          skipped: out.results.filter((r) => r.skipped).length,
+        };
+        response.success(res, { message: '批量审核已完成', summary, results: out.results });
+      } catch (err) {
+        log.error('storyboards sd2-review-batch', { error: err.message });
         response.internalError(res, err);
       }
     },

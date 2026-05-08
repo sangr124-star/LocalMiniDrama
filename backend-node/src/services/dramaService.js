@@ -392,6 +392,7 @@ function rowToStoryboard(r) {
       video_url: r.video_url,
       audio_local_path: r.audio_local_path ?? null,
       narration_audio_local_path: r.narration_audio_local_path ?? null,
+      seedance2_review: parseJsonColumn(r.seedance2_review),
       status: r.status || 'pending',
       error_msg: r.error_msg,
       created_at: r.created_at,

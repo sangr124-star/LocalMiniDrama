@@ -6,7 +6,7 @@ const { aspectRatioToSize } = require('./imageService');
 const aiClient = require('./aiClient');
 const promptI18n = require('./promptI18n');
 const { mergeCfgStyleWithDrama } = require('../utils/dramaStyleMerge');
-const jimengMaterialHubService = require('./jimengMaterialHubService');
+const mgateAssetService = require('./mgateAssetService');
 const uploadService = require('./uploadService');
 const seedance2AssetGuards = require('../utils/seedance2AssetGuards');
 
@@ -703,16 +703,23 @@ function readSeedance2AssetJson(text) {
 }
 
 /**
- * 调用即梦素材库（官方兼容 /api/business/v1/assets）注册角色主图，并轮询至 active / failed（或超时保留 processing）
+ * 「Seedance 2.0 内容审核 + 角色锁定」— 走 mgate 素材库
+ *
+ * 1) 解析角色主图为公网 URL（需要时经中转图床）
+ * 2) ensureReviewGroup（list/create_asset_groups）
+ * 3) create_assets → 拿到 task_id，先落库（status='processing'）
+ * 4) 轮询 get_assets 至 Active / Failed / 超时
+ * 5) Active 时拼装 asset_url = `asset://{Result.Id}` 落库
+ *
+ * Active 后视频生成（同样走 mgate）会把 image_url 替换为 asset:// 实现"角色锁定"。
  */
-async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId) {
-  const materialHub = jimengMaterialHubService;
-  const hubCtx = materialHub.buildHubContext(cfg, db, log);
-  if (!hubCtx.token) {
+async function registerCharacterMgateAsset(db, log, cfg, characterId) {
+  const config = mgateAssetService.pickMgateConfig(db);
+  if (!config) {
     return {
       ok: false,
       error:
-        '未配置即梦2角色认证：请在「AI 配置」中新增一条「即梦2角色认证」，填写网关 URL 与 Token（或设置环境变量 JIMENG2_CHARACTER_AUTH_*；兼容旧 config）',
+        '未找到可用的 ModelGate 配置：请在「AI 配置」中新增或激活一条 api_protocol = modelgate 的配置（image/storyboard_image/video 皆可，会复用 ak/sk 鉴权）',
     };
   }
   const charRow = db.prepare('SELECT * FROM characters WHERE id = ? AND deleted_at IS NULL').get(Number(characterId));
@@ -732,7 +739,14 @@ async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId) {
   const registerImageUrl = pub.url;
 
   const assetName = String(charRow.name || 'role').replace(/\s+/g, '').slice(0, 12) || 'role';
-  const registerUrlLooksPrivate = isNonPublicMaterialHubUrl(imageUrl);
+
+  // 1) 找/建审核组
+  const grp = await mgateAssetService.ensureReviewGroup(config, log);
+  if (!grp.ok) {
+    log.warn('[SD2认证] mgate ensureReviewGroup 失败', { character_id: Number(characterId), error: grp.error });
+    return { ok: false, error: grp.error };
+  }
+
   log.info('[SD2认证] 请求参数摘要', {
     character_id: Number(characterId),
     character_name: charRow.name,
@@ -740,49 +754,44 @@ async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId) {
     image_url_db: charRow.image_url ? String(charRow.image_url).slice(0, 240) : null,
     local_path: charRow.local_path || null,
     resolved_register_image_url: String(registerImageUrl).slice(0, 500),
-    pre_proxy_image_url: registerUrlLooksPrivate ? String(imageUrl).slice(0, 240) : null,
     public_image_via: pub.via,
     storage_base_url: (cfg?.storage?.base_url || '').toString().slice(0, 160),
-    hub_gateway: hubCtx.baseUrl,
-    hub_auth_diag: hubCtx.hubAuthDiag || null,
+    mgate_base_url: (config.base_url || '').slice(0, 160),
+    mgate_group_id: grp.group_id,
     asset_name: assetName,
-    register_url_looks_private_host: registerUrlLooksPrivate,
-    hint: registerUrlLooksPrivate && pub.via !== 'direct'
-      ? '本地/内网图片已自动经中转图床生成公网 URL 后提交素材库'
-      : registerUrlLooksPrivate
-        ? '素材库在云端拉取图片失败多为 URL 不可达：请换图床/公网 https 直链，或将 storage.base_url 改为公网可访问的静态资源地址'
-        : '若仍失败，请用浏览器或 curl 在无 VPN 的机器上访问 resolved_register_image_url 确认 200 且 Content-Type 为图片',
   });
 
-  const createRes = await materialHub.createImageAsset(hubCtx, { url: registerImageUrl, name: assetName }, log);
-  if (!createRes.ok) {
-    log.warn('[SD2认证] create asset 失败', {
+  // 2) 创建素材，立即返回 task_id
+  const create = await mgateAssetService.createImageAsset(
+    { config, group_id: grp.group_id },
+    { url: registerImageUrl, name: assetName },
+    log
+  );
+  if (!create.ok) {
+    log.warn('[SD2认证] mgate create_assets 失败', {
       character_id: Number(characterId),
-      http_status: createRes.status,
-      error: createRes.error,
+      http_status: create.status,
+      error: create.error,
       resolved_register_image_url: registerImageUrl,
-      hub_auth_diag: hubCtx.hubAuthDiag || null,
     });
-    let errMsg = createRes.error || '素材库创建素材失败';
+    let errMsg = create.error || 'mgate 创建素材失败';
     if (/DownloadFailed|download media|accessible|拉取|下载/i.test(String(errMsg))) {
       errMsg +=
         ' 【说明】素材库会从云端访问你提交的「图片 URL」。若原图为 localhost/内网，本服务会先上传中转图床；若仍失败请检查图床是否公网可达，或换公网 https 直链。';
     }
     return { ok: false, error: errMsg };
   }
-  const created = createRes.data;
-  const assetId = created.id;
-  if (!assetId) {
-    return { ok: false, error: '素材库返回缺少素材 id' };
-  }
+  const taskId = create.task_id;
 
   const now = new Date().toISOString();
   const certifiedLp = seedance2AssetGuards.normalizeStorageRelPath(charRow.local_path || '') || null;
   const certifiedImg = (charRow.image_url || '').toString().trim() || null;
   const basePayload = {
-    hub_asset_id: assetId,
-    asset_url: created.asset_url || null,
-    status: created.status || 'processing',
+    hub_provider: 'mgate',
+    hub_task_id: taskId,
+    hub_asset_id: null,
+    asset_url: null,
+    status: 'processing',
     source_image_url: registerImageUrl,
     /** 仅当参考图与认证时主图路径一致时才在视频中替换为 asset://（换主图后须重新认证） */
     certified_local_path: certifiedLp,
@@ -792,6 +801,7 @@ async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId) {
       appearance: (charRow.appearance || '').slice(0, 500) || null,
       description: (charRow.description || '').slice(0, 500) || null,
     },
+    error: null,
     updated_at: now,
   };
   db.prepare('UPDATE characters SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(
@@ -800,21 +810,24 @@ async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId) {
     Number(characterId)
   );
 
-  const poll = await materialHub.pollAssetUntilSettled(hubCtx, assetId, {
-    maxMs: hubCtx.poll_max_ms != null ? Number(hubCtx.poll_max_ms) : 120000,
-    intervalMs: hubCtx.poll_interval_ms != null ? Number(hubCtx.poll_interval_ms) : 2000,
+  // 3) 轮询到结案
+  const poll = await mgateAssetService.pollAssetUntilSettled(config, taskId, {
+    maxMs: 120000,
+    intervalMs: 2000,
     log,
   });
   if (!poll.ok) {
-    log.warn('即梦素材库 poll asset 失败', { characterId, assetId, error: poll.error });
+    log.warn('[SD2认证] mgate pollAsset 失败', { characterId, taskId, error: poll.error });
     return { ok: false, error: poll.error };
   }
-  const settled = poll.asset || created;
+  const settled = poll.asset || {};
   const nextPayload = {
     ...basePayload,
-    asset_url: settled.asset_url ?? basePayload.asset_url,
+    hub_asset_id: settled.id || null,
+    asset_url: settled.asset_url || null,
     status: settled.status || basePayload.status,
-    hub_url: settled.url || created.url || null,
+    hub_url: settled.url || null,
+    error: settled.error || null,
     poll_timed_out: !!poll.timedOut,
     updated_at: new Date().toISOString(),
   };
@@ -823,41 +836,49 @@ async function registerCharacterJimengMaterialAsset(db, log, cfg, characterId) {
     nextPayload.updated_at,
     Number(characterId)
   );
-  log.info('即梦素材库 seedance2 素材已登记', { characterId, hub_asset_id: assetId, status: nextPayload.status });
+  log.info('[SD2认证] mgate 素材已结案', {
+    characterId,
+    task_id: taskId,
+    hub_asset_id: nextPayload.hub_asset_id,
+    status: nextPayload.status,
+    poll_timed_out: nextPayload.poll_timed_out,
+    error_code: nextPayload.error?.code || null,
+  });
   return { ok: true, seedance2_asset: nextPayload };
 }
 
-async function refreshCharacterJimengMaterialAsset(db, log, cfg, characterId) {
-  const materialHub = jimengMaterialHubService;
-  const hubCtx = materialHub.buildHubContext(cfg, db, log);
-  if (!hubCtx.token) {
-    return { ok: false, error: '未配置即梦2角色认证：请在「AI 配置」中填写 Token' };
+async function refreshCharacterMgateAsset(db, log, cfg, characterId) {
+  const config = mgateAssetService.pickMgateConfig(db);
+  if (!config) {
+    return { ok: false, error: '未找到可用的 ModelGate 配置（请检查「AI 配置」）' };
   }
   const charRow = db.prepare('SELECT id, seedance2_asset FROM characters WHERE id = ? AND deleted_at IS NULL').get(Number(characterId));
   if (!charRow) return { ok: false, error: 'character not found' };
   const prev = readSeedance2AssetJson(charRow.seedance2_asset);
-  const assetId = prev?.hub_asset_id;
-  if (!assetId) {
-    return { ok: false, error: '暂未取得素材 id，请先完成 SD2 认证' };
+  const taskId = prev?.hub_task_id;
+  if (!taskId) {
+    return { ok: false, error: '暂未取得审核任务 id，请先完成 SD2 认证' };
   }
-  const r = await materialHub.getAsset(hubCtx, assetId, log);
+  const r = await mgateAssetService.getAsset(config, taskId, log);
   if (!r.ok) {
-    log.warn('[SD2认证] refresh getAsset 失败', {
+    log.warn('[SD2认证] mgate refresh getAsset 失败', {
       character_id: Number(characterId),
       http_status: r.status,
       error: r.error,
-      hub_auth_diag: hubCtx.hubAuthDiag || null,
     });
     return { ok: false, error: r.error };
   }
-  const settled = r.data;
+  const settled = r.data || {};
   const now = new Date().toISOString();
   const nextPayload = {
     ...(prev && typeof prev === 'object' ? prev : {}),
-    hub_asset_id: assetId,
+    hub_provider: 'mgate',
+    hub_task_id: taskId,
+    hub_asset_id: settled.id || prev?.hub_asset_id || null,
     asset_url: settled.asset_url ?? prev?.asset_url ?? null,
     status: settled.status || prev?.status || 'processing',
     hub_url: settled.url ?? prev?.hub_url ?? null,
+    error: settled.error || prev?.error || null,
     updated_at: now,
   };
   db.prepare('UPDATE characters SET seedance2_asset = ?, updated_at = ? WHERE id = ?').run(
@@ -866,6 +887,54 @@ async function refreshCharacterJimengMaterialAsset(db, log, cfg, characterId) {
     Number(characterId)
   );
   return { ok: true, seedance2_asset: nextPayload };
+}
+
+/**
+ * 批量审核某剧（drama_id）下所有未完成认证的角色：
+ *   - 默认跳过 status = 'active' 的角色（除非 force = true）
+ *   - 失败/processing/stale/无 asset 的逐一调 registerCharacterMgateAsset
+ *
+ * @returns {{ ok: true, results: Array<{character_id, name, status, error?}> }}
+ */
+async function batchReviewCharactersMgate(db, log, cfg, dramaId, opts = {}) {
+  const force = !!opts.force;
+  const did = Number(dramaId);
+  if (!Number.isFinite(did) || did <= 0) {
+    return { ok: false, error: '缺少或非法 drama_id' };
+  }
+  const rows = db
+    .prepare(
+      `SELECT id, name, seedance2_asset
+         FROM characters
+         WHERE drama_id = ? AND deleted_at IS NULL
+         ORDER BY id ASC`
+    )
+    .all(did);
+  const results = [];
+  for (const row of rows) {
+    const prev = readSeedance2AssetJson(row.seedance2_asset);
+    const prevStatus = (prev?.status || '').toLowerCase();
+    if (!force && prevStatus === 'active') {
+      results.push({ character_id: row.id, name: row.name, status: 'active', skipped: true });
+      continue;
+    }
+    try {
+      const r = await registerCharacterMgateAsset(db, log, cfg, row.id);
+      if (!r.ok) {
+        results.push({ character_id: row.id, name: row.name, status: 'failed', error: r.error });
+      } else {
+        results.push({
+          character_id: row.id,
+          name: row.name,
+          status: r.seedance2_asset?.status || 'processing',
+          error: r.seedance2_asset?.error?.message || null,
+        });
+      }
+    } catch (e) {
+      results.push({ character_id: row.id, name: row.name, status: 'failed', error: e.message });
+    }
+  }
+  return { ok: true, results };
 }
 
 module.exports = {
@@ -885,6 +954,7 @@ module.exports = {
   generateCharacterFourViewImage,
   generateCharacterPromptOnly,
   extractAppearanceFromImage,
-  registerCharacterJimengMaterialAsset,
-  refreshCharacterJimengMaterialAsset,
+  registerCharacterMgateAsset,
+  refreshCharacterMgateAsset,
+  batchReviewCharactersMgate,
 };

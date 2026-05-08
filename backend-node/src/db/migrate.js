@@ -172,6 +172,7 @@ function ensureAllColumns(database) {
     { name: 'narration_audio_local_path', type: 'TEXT' },         // 解说旁白 TTS 本地路径
     { name: 'creation_mode',     type: 'TEXT DEFAULT \'classic\'' }, // classic | universal
     { name: 'universal_segment_text', type: 'TEXT' },              // 全能模式片段描述（@ 引用等）
+    { name: 'seedance2_review',  type: 'TEXT' },                   // JSON: 分镜图 mgate 审核 { hub_task_id, hub_asset_id, asset_url, status, error, ... }
     { name: 'status',            type: 'TEXT DEFAULT \'draft\'' },
     { name: 'created_at',        type: 'TEXT' },
     { name: 'updated_at',        type: 'TEXT' },

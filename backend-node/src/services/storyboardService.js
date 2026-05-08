@@ -179,6 +179,10 @@ function getStoryboardById(db, id) {
     video_url: r.video_url,
     audio_local_path: r.audio_local_path ?? null,
     narration_audio_local_path: r.narration_audio_local_path ?? null,
+    seedance2_review: (() => {
+      if (!r.seedance2_review) return null;
+      try { return typeof r.seedance2_review === 'string' ? JSON.parse(r.seedance2_review) : r.seedance2_review; } catch { return null; }
+    })(),
     status: r.status || 'pending',
     created_at: r.created_at,
     updated_at: r.updated_at,
