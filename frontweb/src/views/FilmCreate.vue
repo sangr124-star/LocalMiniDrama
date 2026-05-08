@@ -968,7 +968,9 @@
             <template v-if="universalOmniPolishProgress.label">（{{ universalOmniPolishProgress.label }}）</template>
             …
           </span>
-          <span v-else>正在分析剧本并拆解分镜，请稍候...</span>
+          <span v-else>
+            正在分析剧本并拆解分镜<template v-if="storyboardGenElapsed()">（已 {{ storyboardGenElapsed() }}）</template>，请稍候，通常 2-4 分钟…
+          </span>
         </div>
         <div v-if="sbTruncatedWarning && !sbTruncatedDismissed && storyboards.length > 0" class="sb-truncated-warning">
           <el-icon><WarningFilled /></el-icon>
@@ -1499,7 +1501,9 @@
             全能片段润色中 {{ universalOmniPolishProgress.current }}/{{ universalOmniPolishProgress.total }}
             <template v-if="universalOmniPolishProgress.label"> · {{ universalOmniPolishProgress.label }}</template>
           </span>
-          <span v-else class="sb-gen-text">分镜持续生成中，客官稍等片刻…</span>
+          <span v-else class="sb-gen-text">
+            分镜持续生成中<template v-if="storyboardGenElapsed()">（已 {{ storyboardGenElapsed() }}）</template>，客官稍等片刻…
+          </span>
         </div>
         <div v-else-if="storyboards.length === 0" class="empty-tip">请先生成分镜</div>
       </section>
@@ -2600,6 +2604,9 @@ const currentEpisodeVideoUrl = computed(() => {
 })
 
 const storyboardGenerating = ref(false)
+// 分镜生成耗时计时器（用户多次反馈"非常慢"，加实时计时让等待感变可控）
+const storyboardGenTimer = useElapsedTimer()
+function storyboardGenElapsed() { return storyboardGenTimer.text('sb-gen') }
 /** 分镜批量生成结束后，按镜序逐个润色全能片段（仅勾选全能模式且各镜为 universal 且有正文时） */
 const universalOmniPolishRunning = ref(false)
 const universalOmniPolishProgress = ref({ current: 0, total: 0, label: '' })
@@ -5361,6 +5368,7 @@ async function refreshStoryboardsOnly() {
 async function onGenerateStoryboard() {
   if (!currentEpisodeId.value) return
   storyboardGenerating.value = true
+  storyboardGenTimer.start('sb-gen')
   // 生成期间每 2 秒刷新分镜列表，让已解析的分镜逐步出现
   const refreshTimer = setInterval(refreshStoryboardsOnly, 2000)
   try {
@@ -5401,6 +5409,7 @@ async function onGenerateStoryboard() {
   } finally {
     clearInterval(refreshTimer)
     storyboardGenerating.value = false
+    storyboardGenTimer.stop('sb-gen')
   }
 }
 
@@ -6022,6 +6031,9 @@ async function runOneClickPipeline(textOnly = false) {
     const hadBoardsBeforeStep4 = boards.length > 0
     if (boards.length === 0) {
       setPipelineStep(4, '生成分镜脚本...')
+      // 与手动生成一样：开计时器 + 设置 storyboardGenerating，让分镜生成提示条显示「已 X 秒」
+      storyboardGenerating.value = true
+      storyboardGenTimer.start('sb-gen')
       // 与手动生成一样，每 2 秒刷新一次分镜列表，让已解析的分镜逐步显示
       const sbRefreshTimer = setInterval(refreshStoryboardsOnly, 2000)
       try {
@@ -6042,6 +6054,8 @@ async function runOneClickPipeline(textOnly = false) {
             await loadDrama()
             addPipelineError('生成分镜', result.error)
             clearInterval(sbRefreshTimer)
+            storyboardGenerating.value = false
+            storyboardGenTimer.stop('sb-gen')
             return
           }
           if (result?.result?.truncated) {
@@ -6054,9 +6068,13 @@ async function runOneClickPipeline(textOnly = false) {
       } catch (e) {
         addPipelineError('生成分镜', e.message || String(e))
         clearInterval(sbRefreshTimer)
+        storyboardGenerating.value = false
+        storyboardGenTimer.stop('sb-gen')
         return
       }
       clearInterval(sbRefreshTimer)
+      storyboardGenerating.value = false
+      storyboardGenTimer.stop('sb-gen')
       await loadStoryboardMedia()
       boards = store.storyboards || []
     } else {
@@ -6517,6 +6535,8 @@ async function runRepairPipeline() {
     if (boards.length === 0) {
       await checkPause()
       pipelineCurrentStep.value = '正在生成分镜...'
+      storyboardGenerating.value = true
+      storyboardGenTimer.start('sb-gen')
       try {
         const res = await dramaAPI.generateStoryboard(episodeId, {
           aspect_ratio: projectAspectRatio.value || '16:9',
@@ -6528,15 +6548,19 @@ async function runRepairPipeline() {
         const taskId = res?.task_id ?? (typeof res === 'string' ? res : null)
         if (taskId) {
           const result = await pollTaskWithPause(taskId, () => loadDrama())
-          if (result?.paused) { await waitForResume(); return }
-          if (result?.error) { addPipelineError('分镜生成', result.error); return }
+          if (result?.paused) { storyboardGenerating.value = false; storyboardGenTimer.stop('sb-gen'); await waitForResume(); return }
+          if (result?.error) { storyboardGenerating.value = false; storyboardGenTimer.stop('sb-gen'); addPipelineError('分镜生成', result.error); return }
         }
         await loadDrama()
         await pipelineRest()
       } catch (e) {
+        storyboardGenerating.value = false
+        storyboardGenTimer.stop('sb-gen')
         addPipelineError('分镜生成', e.message || String(e))
         return
       }
+      storyboardGenerating.value = false
+      storyboardGenTimer.stop('sb-gen')
       boards = store.storyboards || []
     }
     if (!hadBoardsBeforeRepairSb && storyboardUniversalOmni.value) {
