@@ -141,5 +141,13 @@ export const storyboardsAPI = {
   },
   upscale(id) {
     return request.post(`/storyboards/${id}/upscale`, {})
+  },
+  /** Seedance 2.0 内容审核（mgate 素材库）— 单分镜 */
+  sd2Review(id) {
+    return request.post(`/storyboards/${id}/sd2-review`, {})
+  },
+  /** 批量审核某剧下所有分镜图（drama 维度） */
+  sd2ReviewBatch(dramaId, force = false) {
+    return request.post(`/dramas/${dramaId}/storyboards/sd2-review-batch${force ? '?force=1' : ''}`, {})
   }
 }

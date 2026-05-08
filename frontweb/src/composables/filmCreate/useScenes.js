@@ -4,6 +4,7 @@ import { sceneAPI } from '@/api/scenes'
 import { sceneLibraryAPI } from '@/api/sceneLibrary'
 import { uploadAPI } from '@/api/upload'
 import { useElapsedTimer } from '@/composables/useElapsedTimer'
+import { createBatchPool } from '@/composables/useBatchPipeline'
 
 /**
  * 场景管理 Composable
@@ -47,6 +48,9 @@ export function useScenes(deps) {
   const generatingSceneIds = reactive(new Set())
   const sceneImageTimer = useElapsedTimer()
   function sceneImageElapsedText(id) { return sceneImageTimer.text(id) }
+  // 批量生成状态
+  const batchSceneGenPool = createBatchPool({ concurrency: 5 })
+  const batchSceneErrors = ref([])
 
   // ── 场景库状态 ────────────────────────────────────────
   const showSceneLibrary = ref(false)
@@ -439,6 +443,74 @@ export function useScenes(deps) {
     }
   }
 
+  /**
+   * 批量生成场景图片：5 并发，对所有"无图"场景生成
+   */
+  async function onBatchGenerateScenes() {
+    if (!store.dramaId) { ElMessage.warning('请先选择剧集'); return }
+    if (batchSceneGenPool.running.value) return
+
+    const allScenes = store.scenes || store.drama?.scenes || []
+    const todo = allScenes.filter((s) => !hasAssetImage(s))
+    if (todo.length === 0) {
+      ElMessage.info('所有场景都已有图片，无需批量生成')
+      return
+    }
+
+    batchSceneErrors.value = []
+    batchSceneGenPool.setItems(todo)
+
+    await batchSceneGenPool.run(
+      async (scene) => {
+        scene.errorMsg = ''
+        scene.error_msg = ''
+        generatingSceneIds.add(scene.id)
+        sceneImageTimer.start(scene.id)
+        try {
+          const res = await sceneAPI.generateImage({
+            scene_id: scene.id,
+            model: undefined,
+            style: getSelectedStyle()
+          })
+          const taskId = res?.image_generation?.task_id ?? res?.task_id
+          if (taskId) {
+            const pollRes = await pollTask(taskId)
+            if (pollRes?.status === 'failed') {
+              scene.errorMsg = pollRes.error || '生成失败'
+              return { ok: false, error: pollRes.error || '生成失败' }
+            }
+          }
+          return { ok: true }
+        } finally {
+          generatingSceneIds.delete(scene.id)
+          sceneImageTimer.stop(scene.id)
+        }
+      },
+      {
+        onItemDone: (scene, result) => {
+          if (!result.ok) {
+            batchSceneErrors.value.push({ id: scene.id, name: scene.name || `#${scene.id}`, error: result.error })
+          }
+        },
+      }
+    )
+
+    await loadDrama()
+
+    if (batchSceneGenPool.stopping.value) {
+      ElMessage.info('批量生成已停止')
+    } else {
+      const total = batchSceneGenPool.total.value
+      const failed = batchSceneErrors.value.length
+      if (failed === 0) ElMessage.success(`场景批量生成完成（共 ${total} 条）`)
+      else ElMessage.warning(`批量完成，${failed}/${total} 条失败`)
+    }
+  }
+
+  function onBatchGenerateScenesStop() {
+    batchSceneGenPool.stop()
+  }
+
   return {
     // 弹窗状态
     showEditScene,
@@ -453,6 +525,13 @@ export function useScenes(deps) {
     generatingSceneIds,
     sceneImageTimer,
     sceneImageElapsedText,
+    // 批量生成（摊平为顶层 ref）
+    batchSceneGenRunning: batchSceneGenPool.running,
+    batchSceneGenStopping: batchSceneGenPool.stopping,
+    batchSceneGenTotal: batchSceneGenPool.total,
+    batchSceneGenDone: batchSceneGenPool.done,
+    batchSceneGenFailed: batchSceneGenPool.failed,
+    batchSceneErrors,
     // 库状态
     showSceneLibrary,
     sceneLibraryList,
@@ -488,5 +567,7 @@ export function useScenes(deps) {
     onAddSceneToLibrary,
     onAddSceneToMaterialLibrary,
     onAddSceneFromLibrary,
+    onBatchGenerateScenes,
+    onBatchGenerateScenesStop,
   }
 }

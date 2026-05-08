@@ -4,6 +4,7 @@ import { propAPI } from '@/api/props'
 import { propLibraryAPI } from '@/api/propLibrary'
 import { uploadAPI } from '@/api/upload'
 import { useElapsedTimer } from '@/composables/useElapsedTimer'
+import { createBatchPool } from '@/composables/useBatchPipeline'
 
 /**
  * 道具管理 Composable
@@ -54,6 +55,9 @@ export function useProps(deps) {
   const generatingPropIds = reactive(new Set())
   const propImageTimer = useElapsedTimer()
   function propImageElapsedText(id) { return propImageTimer.text(id) }
+  // 批量生成状态
+  const batchPropGenPool = createBatchPool({ concurrency: 5 })
+  const batchPropErrors = ref([])
 
   // ── 道具库状态 ────────────────────────────────────────
   const showPropLibrary = ref(false)
@@ -299,6 +303,71 @@ export function useProps(deps) {
     }
   }
 
+  /**
+   * 批量生成道具图片：5 并发，对所有"无图"道具生成
+   * 停止：未出队的不再执行；已在跑的等结束
+   */
+  async function onBatchGenerateProps() {
+    if (!store.dramaId) { ElMessage.warning('请先选择剧集'); return }
+    if (batchPropGenPool.running.value) return
+
+    const allProps = store.props || store.drama?.props || []
+    const todo = allProps.filter((p) => !hasAssetImage(p))
+    if (todo.length === 0) {
+      ElMessage.info('所有道具都已有图片，无需批量生成')
+      return
+    }
+
+    batchPropErrors.value = []
+    batchPropGenPool.setItems(todo)
+
+    await batchPropGenPool.run(
+      async (prop) => {
+        prop.errorMsg = ''
+        prop.error_msg = ''
+        generatingPropIds.add(prop.id)
+        propImageTimer.start(prop.id)
+        try {
+          const res = await propAPI.generateImage(prop.id, undefined, getSelectedStyle())
+          const taskId = res?.task_id
+          if (taskId) {
+            const pollRes = await pollTask(taskId)
+            if (pollRes?.status === 'failed') {
+              prop.errorMsg = pollRes.error || '生成失败'
+              return { ok: false, error: pollRes.error || '生成失败' }
+            }
+          }
+          return { ok: true }
+        } finally {
+          generatingPropIds.delete(prop.id)
+          propImageTimer.stop(prop.id)
+        }
+      },
+      {
+        onItemDone: (prop, result) => {
+          if (!result.ok) {
+            batchPropErrors.value.push({ id: prop.id, name: prop.name || `#${prop.id}`, error: result.error })
+          }
+        },
+      }
+    )
+
+    await loadDrama()
+
+    if (batchPropGenPool.stopping.value) {
+      ElMessage.info('批量生成已停止')
+    } else {
+      const total = batchPropGenPool.total.value
+      const failed = batchPropErrors.value.length
+      if (failed === 0) ElMessage.success(`道具批量生成完成（共 ${total} 条）`)
+      else ElMessage.warning(`批量完成，${failed}/${total} 条失败`)
+    }
+  }
+
+  function onBatchGeneratePropsStop() {
+    batchPropGenPool.stop()
+  }
+
   // ── 道具库函数 ────────────────────────────────────────
   async function loadPropLibraryList() {
     propLibraryLoading.value = true
@@ -479,6 +548,13 @@ export function useProps(deps) {
     generatingPropIds,
     propImageTimer,
     propImageElapsedText,
+    // 批量生成（摊平为顶层 ref）
+    batchPropGenRunning: batchPropGenPool.running,
+    batchPropGenStopping: batchPropGenPool.stopping,
+    batchPropGenTotal: batchPropGenPool.total,
+    batchPropGenDone: batchPropGenPool.done,
+    batchPropGenFailed: batchPropGenPool.failed,
+    batchPropErrors,
     // 库状态
     showPropLibrary,
     propLibraryList,
@@ -515,5 +591,7 @@ export function useProps(deps) {
     onAddPropToMaterialLibrary,
     onAddPropFromLibrary,
     doExtractFromRef2,
+    onBatchGenerateProps,
+    onBatchGeneratePropsStop,
   }
 }

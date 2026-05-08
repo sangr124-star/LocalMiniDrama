@@ -6,6 +6,7 @@ import { dramaAPI } from '@/api/drama'
 import { generationAPI } from '@/api/generation'
 import { uploadAPI } from '@/api/upload'
 import { useElapsedTimer } from '@/composables/useElapsedTimer'
+import { createBatchPool, createReviewPipeline } from '@/composables/useBatchPipeline'
 
 /**
  * 角色管理 Composable
@@ -66,6 +67,16 @@ export function useCharacters(deps) {
   const sd2CertifyingId = ref(null)
   const showCharSd2Cert = ref(false)
   const charSd2CertPayload = ref(null)
+  // 批量审核状态
+  const sd2CertifyingBatch = ref(false)
+  const showCharSd2BatchResult = ref(false)
+  const charSd2BatchSummary = ref(null)
+  const charSd2BatchResults = ref([])
+  // 批量生成（含审核）状态：生成池 + 审核池流水
+  const batchCharGenPool = createBatchPool({ concurrency: 5 })
+  const batchCharReviewPipe = createReviewPipeline({ concurrency: 5 })
+  const batchCharErrors = ref([])           // 生成失败记录（[{name, error}]）
+  const batchCharReviewErrors = ref([])     // 审核失败记录（[{name, error}]）
   let charLibraryKeywordTimer = null
 
   // ── 常量 ──────────────────────────────────────────────
@@ -444,10 +455,13 @@ export function useCharacters(deps) {
 
   function charSd2TagText(char) {
     const s = char?.seedance2_asset?.status
-    if (s === 'active') return '已 SD2 认证'
-    if (s === 'failed') return 'SD2 认证失败'
-    if (s === 'processing') return 'SD2 处理中'
-    return '未 SD2 认证'
+    if (s === 'active') return '已通过 SD2 内容审核'
+    if (s === 'failed') {
+      const msg = char?.seedance2_asset?.error?.message
+      return msg ? `审核未通过：${msg}` : 'SD2 内容审核未通过'
+    }
+    if (s === 'processing') return 'SD2 审核处理中'
+    return '尚未进行 SD2 内容审核'
   }
 
   async function onSd2CertifyCharacter(char) {
@@ -457,11 +471,13 @@ export function useCharacters(deps) {
       const res = await characterAPI.sd2Certify(char.id)
       const asset = res?.seedance2_asset
       if (asset?.status === 'active') {
-        ElMessage.success('SD2 素材认证已完成')
+        ElMessage.success('SD2 内容审核通过，已可锁定该角色')
+      } else if (asset?.status === 'failed') {
+        ElMessage.error(`SD2 审核未通过：${asset?.error?.message || asset?.error?.code || '内容违规'}`)
       } else if (asset?.poll_timed_out) {
-        ElMessage.success('已提交认证，即梦素材库仍在处理中，可稍后「刷新认证状态」')
+        ElMessage.warning('已提交审核，处理时间偏长，请稍后「刷新审核状态」')
       } else {
-        ElMessage.success(res?.message || '认证状态已更新')
+        ElMessage.success(res?.message || '审核状态已更新')
       }
       await loadDrama()
     } catch (e) {
@@ -487,6 +503,128 @@ export function useCharacters(deps) {
   function openCharSd2CertDialog(char) {
     charSd2CertPayload.value = char.seedance2_asset ? { ...char.seedance2_asset } : null
     showCharSd2Cert.value = true
+  }
+
+  /** 批量审核本剧所有角色（默认跳过已 active 的） */
+  async function onSd2CertifyBatch(force = false) {
+    if (!store.dramaId) { ElMessage.warning('请先选择剧集'); return }
+    sd2CertifyingBatch.value = true
+    try {
+      const res = await characterAPI.sd2CertifyBatch(store.dramaId, force)
+      charSd2BatchSummary.value = res?.summary || null
+      charSd2BatchResults.value = res?.results || []
+      showCharSd2BatchResult.value = true
+      ElMessage.success(`批量审核已完成：通过 ${res?.summary?.active || 0} / 总 ${res?.summary?.total || 0}`)
+      await loadDrama()
+    } catch (e) {
+      ElMessage.error(e.message || '批量审核失败')
+    } finally {
+      sd2CertifyingBatch.value = false
+    }
+  }
+
+  /**
+   * 批量生成角色（含审核）：对所有"无图"角色生成图片，每张生成完成后立即送 SD2 审核
+   * 生成池 5 并发 + 审核池 5 并发，互不阻塞
+   * 停止：未出队的不再执行；已在跑的等结束
+   */
+  async function onBatchGenerateAndReview() {
+    if (!store.dramaId) { ElMessage.warning('请先选择剧集'); return }
+    if (batchCharGenPool.running.value || batchCharReviewPipe.running.value) return
+
+    const allChars = store.characters || store.drama?.characters || []
+    const todo = allChars.filter((c) => !hasAssetImage(c))
+    if (todo.length === 0) {
+      ElMessage.info('所有角色都已有图片，无需批量生成')
+      return
+    }
+
+    batchCharErrors.value = []
+    batchCharReviewErrors.value = []
+    batchCharGenPool.setItems(todo)
+
+    // 启动审核池：消费来自生成池的 char_id
+    batchCharReviewPipe.start(
+      async (charId) => {
+        const res = await characterAPI.sd2Certify(charId)
+        const asset = res?.seedance2_asset
+        if (asset?.status === 'failed') {
+          return { ok: false, error: asset?.error?.message || asset?.error?.code || 'SD2 审核未通过' }
+        }
+        return { ok: true }
+      },
+      {
+        onItemDone: (charId, result) => {
+          if (!result.ok) {
+            const c = (store.characters || []).find((x) => Number(x.id) === Number(charId))
+            batchCharReviewErrors.value.push({ id: charId, name: c?.name || `#${charId}`, error: result.error })
+          }
+        },
+      }
+    )
+
+    // 启动生成池
+    await batchCharGenPool.run(
+      async (char) => {
+        char.errorMsg = ''
+        char.error_msg = ''
+        generatingCharIds.add(char.id)
+        charImageTimer.start(char.id)
+        try {
+          const res = await characterAPI.generateImage(char.id, undefined, getSelectedStyle())
+          const taskId = res?.image_generation?.task_id ?? res?.task_id
+          if (taskId) {
+            const pollRes = await pollTask(taskId)
+            if (pollRes?.status === 'failed') {
+              char.errorMsg = pollRes.error || '生成失败'
+              return { ok: false, error: pollRes.error || '生成失败' }
+            }
+          }
+          return { ok: true }
+        } finally {
+          generatingCharIds.delete(char.id)
+          charImageTimer.stop(char.id)
+        }
+      },
+      {
+        onItemDone: (char, result) => {
+          if (result.ok) {
+            // 生成成功 → 送审核池
+            batchCharReviewPipe.push(char.id)
+          } else {
+            batchCharErrors.value.push({ id: char.id, name: char.name || `#${char.id}`, error: result.error })
+          }
+        },
+      }
+    )
+
+    // 生成池跑完，标记审核池"不会再有新 item"，等其清空
+    batchCharReviewPipe.close()
+    await batchCharReviewPipe.waitDone()
+
+    // 刷一次 drama 拉新数据（含 seedance2_asset 状态）
+    await loadDrama()
+
+    const stopped = batchCharGenPool.stopping.value || batchCharReviewPipe.stopping.value
+    if (stopped) {
+      ElMessage.info('批量生成已停止')
+    } else {
+      const genTotal = batchCharGenPool.total.value
+      const genFailed = batchCharErrors.value.length
+      const revTotal = batchCharReviewPipe.enqueued.value
+      const revFailed = batchCharReviewErrors.value.length
+      if (genFailed === 0 && revFailed === 0) {
+        ElMessage.success(`批量完成：生成 ${genTotal} 张，审核全部通过`)
+      } else {
+        ElMessage.warning(`批量完成：生成 ${genTotal - genFailed}/${genTotal}，审核 ${revTotal - revFailed}/${revTotal}`)
+      }
+    }
+  }
+
+  /** 停止批量生成（含审核）：未出队的丢弃，已在跑的等结束 */
+  function onBatchGenerateAndReviewStop() {
+    batchCharGenPool.stop()
+    batchCharReviewPipe.stop()
   }
 
   async function onAddCharFromLibrary(item) {
@@ -603,6 +741,23 @@ export function useCharacters(deps) {
     charSd2CertPayload,
     charSd2TagType,
     charSd2TagText,
+    sd2CertifyingBatch,
+    showCharSd2BatchResult,
+    charSd2BatchSummary,
+    charSd2BatchResults,
+    // 批量生成（含审核）—— 摊平成顶层 ref，便于模板直接绑定
+    batchCharGenRunning: batchCharGenPool.running,
+    batchCharGenStopping: batchCharGenPool.stopping,
+    batchCharGenTotal: batchCharGenPool.total,
+    batchCharGenDone: batchCharGenPool.done,
+    batchCharGenFailed: batchCharGenPool.failed,
+    batchCharReviewRunning: batchCharReviewPipe.running,
+    batchCharReviewStopping: batchCharReviewPipe.stopping,
+    batchCharReviewEnqueued: batchCharReviewPipe.enqueued,
+    batchCharReviewDone: batchCharReviewPipe.done,
+    batchCharReviewFailed: batchCharReviewPipe.failed,
+    batchCharErrors,
+    batchCharReviewErrors,
     // 函数
     charRoleLabel,
     onGenerateCharacters,
@@ -628,6 +783,9 @@ export function useCharacters(deps) {
     onSd2CertifyCharacter,
     onSd2CertifyRefresh,
     openCharSd2CertDialog,
+    onSd2CertifyBatch,
+    onBatchGenerateAndReview,
+    onBatchGenerateAndReviewStop,
     onAddCharFromLibrary,
   }
 }

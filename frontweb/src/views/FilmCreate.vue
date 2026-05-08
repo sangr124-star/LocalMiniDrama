@@ -252,6 +252,12 @@
             <el-option label="12秒/段" :value="12" />
             <el-option label="15秒/段" :value="15" />
           </el-select>
+          <el-select v-model="videoResolution" style="width: 110px" title="视频分辨率（默认 720p；2K/1440p 文件大、生成更慢）" @change="() => saveProjectSettings(false)">
+            <el-option label="480p" value="480p" />
+            <el-option label="720p（默认）" value="720p" />
+            <el-option label="1080p" value="1080p" />
+            <el-option label="1440p / 2K" value="1440p" />
+          </el-select>
           <el-select v-model="scriptLanguage" placeholder="分镜语言" clearable style="width: 105px">
             <el-option label="中文" value="zh" />
             <el-option label="英文" value="en" />
@@ -378,6 +384,67 @@
                 </el-button>
                 <el-button size="small" :disabled="!dramaId" @click="openAddCharacter">添加角色</el-button>
                 <el-button size="small" @click="showCharLibrary = true">本剧角色库</el-button>
+                <el-button
+                  size="small"
+                  type="primary"
+                  :loading="batchCharGenRunning || batchCharReviewRunning"
+                  :disabled="!dramaId || !characters || characters.length === 0"
+                  title="对所有无图角色批量 AI 生成图片（5 并发），每张完成后立即送 SD2 内容审核（5 并发流水）"
+                  @click="onBatchGenCharAndReview"
+                >
+                  批量生成角色（含审核）
+                </el-button>
+                <el-button
+                  v-if="batchCharGenRunning || batchCharReviewRunning"
+                  size="small"
+                  type="danger"
+                  plain
+                  :disabled="batchCharGenStopping && batchCharReviewStopping"
+                  @click="onBatchGenCharAndReviewStop"
+                >
+                  停止
+                </el-button>
+                <el-button
+                  size="small"
+                  type="warning"
+                  plain
+                  :loading="sd2CertifyingBatch"
+                  :disabled="!dramaId || !characters || characters.length === 0"
+                  title="一键审核本剧所有角色（已通过的会跳过）。Seedance 2.0 内容审核 + 角色锁定，走 mgate 素材库。"
+                  @click="onSd2CertifyBatch(false)"
+                >
+                  批量审核角色
+                </el-button>
+              </div>
+              <!-- 批量生成（含审核）进度条 -->
+              <div
+                v-if="batchCharGenRunning || batchCharReviewRunning || batchCharErrors.length || batchCharReviewErrors.length"
+                class="batch-status"
+                style="margin-top:8px"
+              >
+                <div v-if="batchCharGenRunning" class="batch-progress">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  <span>生成图片：{{ batchCharGenDone }}/{{ batchCharGenTotal }}</span>
+                  <span v-if="batchCharGenFailed > 0" class="batch-failed">{{ batchCharGenFailed }} 条失败</span>
+                  <span v-if="batchCharGenStopping" class="batch-stopping">（正在停止...）</span>
+                </div>
+                <div v-if="batchCharReviewRunning || batchCharReviewEnqueued > 0" class="batch-progress">
+                  <el-icon v-if="batchCharReviewRunning" class="is-loading"><Loading /></el-icon>
+                  <span>SD2 审核：{{ batchCharReviewDone }}/{{ batchCharReviewEnqueued }}</span>
+                  <span v-if="batchCharReviewFailed > 0" class="batch-failed">{{ batchCharReviewFailed }} 条失败</span>
+                </div>
+                <div v-if="batchCharErrors.length > 0" class="batch-error-log">
+                  <div class="batch-error-title">生成失败：</div>
+                  <div v-for="(e, i) in batchCharErrors" :key="'g' + i" class="batch-error-line">
+                    {{ e.name }}：{{ e.error }}
+                  </div>
+                </div>
+                <div v-if="batchCharReviewErrors.length > 0" class="batch-error-log">
+                  <div class="batch-error-title">审核失败：</div>
+                  <div v-for="(e, i) in batchCharReviewErrors" :key="'r' + i" class="batch-error-line">
+                    {{ e.name }}：{{ e.error }}
+                  </div>
+                </div>
               </div>
               <div class="asset-list asset-list-two">
                 <div v-for="char in characters" :key="char.id" class="asset-item asset-item-left-right">
@@ -407,7 +474,7 @@
                           plain
                           :loading="sd2CertifyingId === char.id"
                           :disabled="!hasAssetImage(char)"
-                          title="将角色主图注册到即梦素材库（与官方接口一致），供 Seedance 2.0 / 即梦 2.0 等引用 asset://"
+                          title="Seedance 2.0 内容审核 + 角色锁定（mgate 素材库）：审核通过后视频生成会以 asset:// 锁定该角色"
                           @click="onSd2CertifyCharacter(char)"
                         >
                           SD2认证
@@ -417,8 +484,10 @@
                             <div class="sd2-tooltip-inner">
                               <div class="sd2-tooltip-status">{{ charSd2TagText(char) }}</div>
                               <p class="sd2-tooltip-p">
-                                即梦 2.0 等模型需先在即梦素材库完成认证后方可引用本角色图（接口形态参见
-                                <a href="https://83zi.com/sd2realperson.html" target="_blank" rel="noopener noreferrer">官方素材管理 API 说明</a>，base_url 可换用自建或其它兼容网关）。
+                                Seedance 2.0 内容审核 + 角色锁定：把角色主图提交 mgate 素材库做内容合规判定；通过后该角色在视频生成时会以 <code>asset://</code> 形式锁定，提升一致性。
+                              </p>
+                              <p v-if="char.seedance2_asset?.error?.message" class="sd2-tooltip-p" style="color:#f56c6c">
+                                上次失败原因：{{ char.seedance2_asset.error.message }}
                               </p>
                             </div>
                           </template>
@@ -428,24 +497,24 @@
                         </el-tooltip>
                       </span>
                       <el-button
-                        v-if="char.seedance2_asset?.hub_asset_id && char.seedance2_asset?.status !== 'active'"
+                        v-if="(char.seedance2_asset?.hub_task_id || char.seedance2_asset?.hub_asset_id) && char.seedance2_asset?.status !== 'active'"
                         size="small"
                         link
                         type="primary"
                         :loading="sd2CertifyingId === char.id"
                         @click="onSd2CertifyRefresh(char)"
                       >
-                        刷新认证状态
+                        刷新审核状态
                       </el-button>
                       <el-button
                         v-if="char.seedance2_asset?.status === 'active'"
                         size="small"
                         type="success"
                         plain
-                        title="查看即梦素材库中的 SD2 登记信息"
+                        title="查看 SD2 内容审核详情（mgate 素材库）"
                         @click="openCharSd2CertDialog(char)"
                       >
-                        查看sd2认证
+                        查看SD2审核
                       </el-button>
                     </div>
                     <div v-if="getCharAffectedStoryboards(char.id).length" class="asset-storyboard-link">
@@ -522,6 +591,32 @@
                 <el-button type="primary" size="small" :loading="propsExtracting" :disabled="!currentEpisodeId" @click="onExtractProps">从剧本提取道具</el-button>
                 <el-button size="small" :disabled="!dramaId" @click="showAddProp = true">添加道具</el-button>
                 <el-button size="small" @click="showPropLibrary = true">本剧道具库</el-button>
+                <el-button
+                  size="small"
+                  type="primary"
+                  :loading="batchPropGenRunning"
+                  :disabled="!dramaId || !props || props.length === 0"
+                  title="对所有无图道具批量 AI 生成图片（5 并发）"
+                  @click="onBatchGenerateProps"
+                >
+                  批量生成道具
+                </el-button>
+                <el-button v-if="batchPropGenRunning" size="small" type="danger" plain :disabled="batchPropGenStopping" @click="onBatchGeneratePropsStop">
+                  停止
+                </el-button>
+              </div>
+              <!-- 批量生成进度条 -->
+              <div v-if="batchPropGenRunning || batchPropErrors.length" class="batch-status" style="margin-top:8px">
+                <div v-if="batchPropGenRunning" class="batch-progress">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  <span>生成图片：{{ batchPropGenDone }}/{{ batchPropGenTotal }}</span>
+                  <span v-if="batchPropGenFailed > 0" class="batch-failed">{{ batchPropGenFailed }} 条失败</span>
+                  <span v-if="batchPropGenStopping" class="batch-stopping">（正在停止...）</span>
+                </div>
+                <div v-if="batchPropErrors.length > 0" class="batch-error-log">
+                  <div class="batch-error-title">生成失败：</div>
+                  <div v-for="(e, i) in batchPropErrors" :key="i" class="batch-error-line">{{ e.name }}：{{ e.error }}</div>
+                </div>
               </div>
               <div class="asset-list asset-list-two">
                 <div v-for="prop in props" :key="prop.id" class="asset-item asset-item-left-right">
@@ -596,6 +691,32 @@
                 </el-button>
                 <el-button size="small" :disabled="!dramaId" @click="openAddScene">添加场景</el-button>
                 <el-button size="small" @click="showSceneLibrary = true">本剧场景库</el-button>
+                <el-button
+                  size="small"
+                  type="primary"
+                  :loading="batchSceneGenRunning"
+                  :disabled="!dramaId || !scenes || scenes.length === 0"
+                  title="对所有无图场景批量 AI 生成图片（5 并发）"
+                  @click="onBatchGenerateScenes"
+                >
+                  批量生成场景
+                </el-button>
+                <el-button v-if="batchSceneGenRunning" size="small" type="danger" plain :disabled="batchSceneGenStopping" @click="onBatchGenerateScenesStop">
+                  停止
+                </el-button>
+              </div>
+              <!-- 批量生成进度条 -->
+              <div v-if="batchSceneGenRunning || batchSceneErrors.length" class="batch-status" style="margin-top:8px">
+                <div v-if="batchSceneGenRunning" class="batch-progress">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  <span>生成图片：{{ batchSceneGenDone }}/{{ batchSceneGenTotal }}</span>
+                  <span v-if="batchSceneGenFailed > 0" class="batch-failed">{{ batchSceneGenFailed }} 条失败</span>
+                  <span v-if="batchSceneGenStopping" class="batch-stopping">（正在停止...）</span>
+                </div>
+                <div v-if="batchSceneErrors.length > 0" class="batch-error-log">
+                  <div class="batch-error-title">生成失败：</div>
+                  <div v-for="(e, i) in batchSceneErrors" :key="i" class="batch-error-line">{{ e.name }}：{{ e.error }}</div>
+                </div>
               </div>
               <div class="asset-list asset-list-two">
                 <div v-for="scene in scenes" :key="scene.id" class="asset-item asset-item-left-right">
@@ -741,8 +862,19 @@
               >
                 批量生成分镜视频
               </el-button>
-              <el-button v-if="batchImageRunning" size="large" type="danger" plain @click="batchImageStopping = true">停止图片</el-button>
+              <el-button v-if="batchImageRunning" size="large" type="danger" plain @click="onStopBatchImage">停止图片</el-button>
               <el-button v-if="batchVideoRunning" size="large" type="danger" plain @click="batchVideoStopping = true">停止视频</el-button>
+              <el-button
+                size="large"
+                type="warning"
+                plain
+                :loading="sbReviewingBatch"
+                :disabled="!dramaId"
+                title="一键审核本剧所有分镜图（已通过的会跳过）。Seedance 2.0 内容审核（mgate）"
+                @click="onSbSd2ReviewBatch(false)"
+              >
+                批量审核分镜图
+              </el-button>
             </div>
             <div class="batch-video-options" style="margin-top:8px;display:flex;align-items:center;gap:8px;font-size:13px;">
               <el-checkbox v-model="videoFrameContiguity" size="small">
@@ -767,12 +899,17 @@
           </template>
         </div>
         <!-- 批量生成进度 -->
-        <div v-if="batchImageRunning || batchVideoRunning || batchImageErrors.length || batchVideoErrors.length" class="batch-status">
+        <div v-if="batchImageRunning || batchVideoRunning || batchImageErrors.length || batchVideoErrors.length || batchSbReviewRunning || batchSbReviewErrors.length" class="batch-status">
           <div v-if="batchImageRunning" class="batch-progress">
             <el-icon class="is-loading"><Loading /></el-icon>
             <span>批量生成分镜图：{{ batchImageProgress.current }}/{{ batchImageProgress.total }}</span>
             <span v-if="batchImageProgress.failed > 0" class="batch-failed">{{ batchImageProgress.failed }} 条失败</span>
             <span v-if="batchImageStopping" class="batch-stopping">（正在停止...）</span>
+          </div>
+          <div v-if="batchSbReviewRunning || batchSbReviewEnqueued > 0" class="batch-progress">
+            <el-icon v-if="batchSbReviewRunning" class="is-loading"><Loading /></el-icon>
+            <span>SD2 审核：{{ batchSbReviewDone }}/{{ batchSbReviewEnqueued }}</span>
+            <span v-if="batchSbReviewFailed > 0" class="batch-failed">{{ batchSbReviewFailed }} 条失败</span>
           </div>
           <div v-if="batchVideoRunning" class="batch-progress">
             <el-icon class="is-loading"><Loading /></el-icon>
@@ -783,6 +920,10 @@
           <div v-if="batchImageErrors.length > 0" class="batch-error-log">
             <div class="batch-error-title">分镜图生成失败记录：</div>
             <div v-for="(e, i) in batchImageErrors" :key="i" class="batch-error-line">{{ e }}</div>
+          </div>
+          <div v-if="batchSbReviewErrors.length > 0" class="batch-error-log">
+            <div class="batch-error-title">分镜审核失败记录：</div>
+            <div v-for="(e, i) in batchSbReviewErrors" :key="'sb-r-' + i" class="batch-error-line">#{{ e.sbNumber }}：{{ e.error }}</div>
           </div>
           <div v-if="batchVideoErrors.length > 0" class="batch-error-log">
             <div class="batch-error-title">分镜视频生成失败记录：</div>
@@ -1183,6 +1324,29 @@
                     <el-icon><ZoomIn /></el-icon>超分
                   </el-button>
                 </el-tooltip>
+                <!-- Seedance 2.0 内容审核按钮 + 状态徽章 -->
+                <el-tooltip placement="top" :show-after="160">
+                  <template #content>
+                    <div style="max-width:300px">
+                      <div>{{ sbReviewTagText(sb) }}</div>
+                      <div v-if="sb.seedance2_review?.error?.message" style="color:#f56c6c;margin-top:6px">
+                        失败原因：{{ sb.seedance2_review.error.message }}
+                      </div>
+                    </div>
+                  </template>
+                  <el-button
+                    size="small"
+                    :type="sbReviewTagType(sb)"
+                    plain
+                    :loading="sbReviewingIds.has(sb.id)"
+                    @click="onSbSd2Review(sb)"
+                  >
+                    <span v-if="sb.seedance2_review?.status === 'active'">已审核 ✓</span>
+                    <span v-else-if="sb.seedance2_review?.status === 'failed'">审核未过 ✗</span>
+                    <span v-else-if="sb.seedance2_review?.status === 'processing'">审核中…</span>
+                    <span v-else>SD2 审核</span>
+                  </el-button>
+                </el-tooltip>
               </div>
               </template>
             </div>
@@ -1530,16 +1694,23 @@
       </template>
     </el-dialog>
 
-    <!-- Seedance 2.0 / 即梦素材库 角色认证信息 -->
-    <el-dialog v-model="showCharSd2Cert" title="SD2 素材认证信息（即梦素材库）" width="520px" destroy-on-close>
+    <!-- Seedance 2.0 内容审核 + 角色锁定 详情（mgate 素材库） -->
+    <el-dialog v-model="showCharSd2Cert" title="Seedance 2.0 内容审核 + 角色锁定" width="520px" destroy-on-close>
       <template v-if="charSd2CertPayload">
         <el-descriptions :column="1" border size="small">
-          <el-descriptions-item label="素材 ID">{{ charSd2CertPayload.hub_asset_id || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="审核任务 Id">{{ charSd2CertPayload.hub_task_id || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="素材 Id">{{ charSd2CertPayload.hub_asset_id || '—' }}</el-descriptions-item>
           <el-descriptions-item label="asset_url（视频生成引用）">
             <code class="sd2-mono">{{ charSd2CertPayload.asset_url || '—' }}</code>
           </el-descriptions-item>
           <el-descriptions-item label="状态">{{ charSd2CertPayload.status || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="注册时图片 URL">
+          <el-descriptions-item v-if="charSd2CertPayload.error" label="失败原因">
+            <div class="sd2-break" style="color:#f56c6c">
+              <div v-if="charSd2CertPayload.error.code">[{{ charSd2CertPayload.error.code }}]</div>
+              <div>{{ charSd2CertPayload.error.message || '—' }}</div>
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item label="提交时的图片 URL">
             <span class="sd2-break">{{ charSd2CertPayload.source_image_url || '—' }}</span>
           </el-descriptions-item>
           <el-descriptions-item v-if="charSd2CertPayload.character_display" label="备案角色信息">
@@ -1548,13 +1719,79 @@
           </el-descriptions-item>
         </el-descriptions>
         <p class="sd2-doc-tip">
-          接口与字段说明见
-          <a href="https://83zi.com/sd2realperson.html" target="_blank" rel="noopener noreferrer">即梦/Seedance 素材管理 API（文档示例）</a>
-          ；请在「AI 配置」中新增「即梦2角色认证」，填写网关 URL 与 Token。生成视频时在内容中传入 <code>image_url.url = asset_url</code> 即可引用。
+          走 mgate 素材库（<code>/ai_router/create_assets</code>）做内容合规判定。审核通过的角色，视频生成时该角色主图会被替换为 <code>asset://</code> 引用，提升角色一致性。
         </p>
       </template>
       <template #footer>
         <el-button @click="showCharSd2Cert = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 分镜图批量审核结果 -->
+    <el-dialog v-model="showSbSd2BatchResult" title="分镜图批量审核结果" width="720px" destroy-on-close>
+      <div v-if="sbSd2BatchSummary" style="margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
+        <el-tag type="info">总数 {{ sbSd2BatchSummary.total }}</el-tag>
+        <el-tag type="success">通过 {{ sbSd2BatchSummary.active }}</el-tag>
+        <el-tag type="danger">未通过 {{ sbSd2BatchSummary.failed }}</el-tag>
+        <el-tag v-if="sbSd2BatchSummary.processing">处理中 {{ sbSd2BatchSummary.processing }}</el-tag>
+        <el-tag v-if="sbSd2BatchSummary.skipped" type="warning">跳过 {{ sbSd2BatchSummary.skipped }}（已通过）</el-tag>
+      </div>
+      <el-table :data="sbSd2BatchResults" size="small" border max-height="460">
+        <el-table-column label="分镜" width="100">
+          <template #default="{ row }">#{{ row.storyboard_number || row.storyboard_id }}</template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'active'" type="success" size="small">通过</el-tag>
+            <el-tag v-else-if="row.status === 'failed'" type="danger" size="small">未通过</el-tag>
+            <el-tag v-else-if="row.status === 'processing'" type="info" size="small">处理中</el-tag>
+            <el-tag v-else size="small">{{ row.status }}</el-tag>
+            <span v-if="row.skipped" style="margin-left:6px;color:#909399;font-size:12px">（跳过）</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="error" label="失败原因 / 备注">
+          <template #default="{ row }">
+            <span v-if="row.error" style="color:#f56c6c">{{ row.error }}</span>
+            <span v-else style="color:#909399">—</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="showSbSd2BatchResult = false">关闭</el-button>
+        <el-button type="warning" @click="onSbSd2ReviewBatch(true)">强制全部重审</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量审核结果 -->
+    <el-dialog v-model="showCharSd2BatchResult" title="批量内容审核结果" width="640px" destroy-on-close>
+      <div v-if="charSd2BatchSummary" style="margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
+        <el-tag type="info">总数 {{ charSd2BatchSummary.total }}</el-tag>
+        <el-tag type="success">通过 {{ charSd2BatchSummary.active }}</el-tag>
+        <el-tag type="danger">未通过 {{ charSd2BatchSummary.failed }}</el-tag>
+        <el-tag v-if="charSd2BatchSummary.processing">处理中 {{ charSd2BatchSummary.processing }}</el-tag>
+        <el-tag v-if="charSd2BatchSummary.skipped" type="warning">跳过 {{ charSd2BatchSummary.skipped }}（已通过）</el-tag>
+      </div>
+      <el-table :data="charSd2BatchResults" size="small" border max-height="420">
+        <el-table-column prop="name" label="角色" width="140" />
+        <el-table-column prop="status" label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.status === 'active'" type="success" size="small">通过</el-tag>
+            <el-tag v-else-if="row.status === 'failed'" type="danger" size="small">未通过</el-tag>
+            <el-tag v-else-if="row.status === 'processing'" type="info" size="small">处理中</el-tag>
+            <el-tag v-else size="small">{{ row.status }}</el-tag>
+            <span v-if="row.skipped" style="margin-left:6px;color:#909399;font-size:12px">（跳过）</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="error" label="失败原因 / 备注">
+          <template #default="{ row }">
+            <span v-if="row.error" style="color:#f56c6c">{{ row.error }}</span>
+            <span v-else style="color:#909399">—</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="showCharSd2BatchResult = false">关闭</el-button>
+        <el-button type="warning" @click="onSd2CertifyBatch(true)">强制全部重审</el-button>
       </template>
     </el-dialog>
 
@@ -2165,6 +2402,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Setting, Plus, Minus, Sunny, Moon, MagicStick, Upload, Delete, Check, Loading, WarningFilled, User, Box, Picture, Film, VideoCamera, Document, InfoFilled, Refresh, ZoomIn, QuestionFilled, DocumentAdd, Expand, Fold, VideoPlay } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
 import { useElapsedTimer } from '@/composables/useElapsedTimer'
+import { createReviewPipeline } from '@/composables/useBatchPipeline'
 import { useFilmStore } from '@/stores/film'
 import { dramaAPI } from '@/api/drama'
 import { generationAPI } from '@/api/generation'
@@ -2232,6 +2470,7 @@ const scriptGenerating = ref(false)
 const generationStyle = ref('')
 const projectAspectRatio = ref('16:9')
 const videoClipDuration = ref(5)
+// videoResolution 来自 store（见下方 storeToRefs），默认 720p；底部「视频配置」与本集配置共用同一个值
 
 /** 根据 value 查找样式选项对象 */
 function _findStyleOption(val) {
@@ -2373,12 +2612,19 @@ const {
   charLibraryTotal, charLibraryKeyword, showEditCharLibrary, editCharLibraryForm,
   editCharLibrarySaving, addingCharToLibraryId, addingCharToMaterialId, addingCharFromLibraryId,
   sd2CertifyingId, showCharSd2Cert, charSd2CertPayload, charSd2TagText,
+  sd2CertifyingBatch, showCharSd2BatchResult, charSd2BatchSummary, charSd2BatchResults,
+  batchCharGenRunning, batchCharGenStopping, batchCharGenTotal, batchCharGenDone, batchCharGenFailed,
+  batchCharReviewRunning, batchCharReviewStopping, batchCharReviewEnqueued, batchCharReviewDone, batchCharReviewFailed,
+  batchCharErrors, batchCharReviewErrors,
   charRoleLabel, onGenerateCharacters, openAddCharacter, stopCharacterPromptPoll, editCharacter,
   saveCharRefImageIfAny, submitEditCharacter, doGenerateCharacterPrompt, doExtractCharFromImage,
   extractIdentityAnchors, clearCharRefImage, onCloseCharDialog, onDeleteCharacter, onGenerateCharacterImage,
   loadCharLibraryList, debouncedLoadCharLibrary, openEditCharLibrary, submitEditCharLibrary,
   onDeleteCharLibrary, onAddCharacterToLibrary, onAddCharacterToMaterialLibrary, onSd2CertifyCharacter,
-  onSd2CertifyRefresh, openCharSd2CertDialog, onAddCharFromLibrary,
+  onSd2CertifyRefresh, openCharSd2CertDialog, onSd2CertifyBatch,
+  onBatchGenerateAndReview: onBatchGenCharAndReview,
+  onBatchGenerateAndReviewStop: onBatchGenCharAndReviewStop,
+  onAddCharFromLibrary,
   charImageElapsedText,
 } = useCharacters({ store, dramaId, currentEpisodeId, getSelectedStyle, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage })
 
@@ -2392,12 +2638,13 @@ const {
   showPropLibrary, propLibraryList, propLibraryLoading, propLibraryPage, propLibraryPageSize,
   propLibraryTotal, propLibraryKeyword, showEditPropLibrary, editPropLibraryForm,
   editPropLibrarySaving, addingPropToLibraryId, addingPropToMaterialId, addingPropFromLibraryId,
+  batchPropGenRunning, batchPropGenStopping, batchPropGenTotal, batchPropGenDone, batchPropGenFailed, batchPropErrors,
   onExtractProps, stopPropPromptPoll, editProp, doGeneratePropPrompt, savePropRefImageIfAny,
   clearPropRefImage, doExtractPropFromImage, submitEditProp, submitAddProp,
   onClosePropDialog, onDeleteProp, onGeneratePropImage,
   loadPropLibraryList, debouncedLoadPropLibrary, openEditPropLibrary, submitEditPropLibrary,
   onDeletePropLibrary, onAddPropToLibrary, onAddPropToMaterialLibrary, onAddPropFromLibrary,
-  doExtractFromRef2,
+  doExtractFromRef2, onBatchGenerateProps, onBatchGeneratePropsStop,
   propImageElapsedText,
 } = usePropsComposable({ store, dramaId, currentEpisodeId, getSelectedStyle, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage })
 
@@ -2410,11 +2657,13 @@ const {
   showSceneLibrary, sceneLibraryList, sceneLibraryLoading, sceneLibraryPage, sceneLibraryPageSize,
   sceneLibraryTotal, sceneLibraryKeyword, showEditSceneLibrary, editSceneLibraryForm,
   editSceneLibrarySaving, addingSceneToLibraryId, addingSceneToMaterialId, addingSceneFromLibraryId,
+  batchSceneGenRunning, batchSceneGenStopping, batchSceneGenTotal, batchSceneGenDone, batchSceneGenFailed, batchSceneErrors,
   onExtractScenes, openAddScene, stopScenePromptPoll, editScene, doGenerateScenePrompt,
   saveSceneRefImageIfAny, clearSceneRefImage, doExtractSceneFromImage, submitEditScene,
   onCloseSceneDialog, onDeleteScene, onGenerateSceneImage,
   loadSceneLibraryList, debouncedLoadSceneLibrary, openEditSceneLibrary, submitEditSceneLibrary,
   onDeleteSceneLibrary, onAddSceneToLibrary, onAddSceneToMaterialLibrary, onAddSceneFromLibrary,
+  onBatchGenerateScenes, onBatchGenerateScenesStop,
   sceneImageElapsedText,
 } = useScenes({ store, dramaId, currentEpisodeId, getSelectedStyle, scriptLanguage, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage, dramaAPI })
 
@@ -2591,13 +2840,81 @@ const showVideoParamsDialog = ref(false)
 const videoParamsTarget = ref(null)
 const videoParamsSaving = ref(false)
 const batchImageErrors = ref([])
+// 批量生成分镜图：分镜图生成成功后立即送 SD2 审核（5 并发流水）
+const batchSbReviewPipe = createReviewPipeline({ concurrency: 5 })
+const batchSbReviewRunning = batchSbReviewPipe.running
+const batchSbReviewEnqueued = batchSbReviewPipe.enqueued
+const batchSbReviewDone = batchSbReviewPipe.done
+const batchSbReviewFailed = batchSbReviewPipe.failed
+const batchSbReviewErrors = ref([])  // [{ id, sbNumber, error }]
 // 批量生成分镜视频
 const batchVideoRunning = ref(false)
 const batchVideoStopping = ref(false)
 const batchVideoProgress = ref({ current: 0, total: 0, failed: 0 })
 const batchVideoErrors = ref([])
+// 分镜图 SD2 内容审核（mgate）
+const sbReviewingIds = reactive(new Set())
+const sbReviewingBatch = ref(false)
+const showSbSd2BatchResult = ref(false)
+const sbSd2BatchSummary = ref(null)
+const sbSd2BatchResults = ref([])
+function sbReviewTagText(sb) {
+  const s = sb?.seedance2_review?.status
+  if (s === 'active') return '已通过 SD2 内容审核'
+  if (s === 'failed') {
+    const msg = sb?.seedance2_review?.error?.message
+    return msg ? `审核未通过：${msg}` : 'SD2 内容审核未通过'
+  }
+  if (s === 'processing') return 'SD2 审核处理中'
+  return '尚未进行 SD2 内容审核'
+}
+function sbReviewTagType(sb) {
+  const s = sb?.seedance2_review?.status
+  if (s === 'active') return 'success'
+  if (s === 'failed') return 'danger'
+  if (s === 'processing') return 'info'
+  return 'warning'
+}
+async function onSbSd2Review(sb) {
+  if (!sb?.id) return
+  sbReviewingIds.add(sb.id)
+  try {
+    const res = await storyboardsAPI.sd2Review(sb.id)
+    const review = res?.seedance2_review
+    if (review?.status === 'active') {
+      ElMessage.success(`分镜 #${sb.storyboard_number} 审核通过`)
+    } else if (review?.status === 'failed') {
+      ElMessage.error(`分镜 #${sb.storyboard_number} 审核未通过：${review?.error?.message || review?.error?.code || '内容违规'}`)
+    } else if (review?.poll_timed_out) {
+      ElMessage.warning('已提交审核，处理时间偏长，请稍后再试')
+    } else {
+      ElMessage.success(res?.message || '审核状态已更新')
+    }
+    await loadDrama()
+  } catch (e) {
+    ElMessage.error(e.message || '审核失败')
+  } finally {
+    sbReviewingIds.delete(sb.id)
+  }
+}
+async function onSbSd2ReviewBatch(force = false) {
+  if (!dramaId.value) { ElMessage.warning('请先选择剧集'); return }
+  sbReviewingBatch.value = true
+  try {
+    const res = await storyboardsAPI.sd2ReviewBatch(dramaId.value, force)
+    sbSd2BatchSummary.value = res?.summary || null
+    sbSd2BatchResults.value = res?.results || []
+    showSbSd2BatchResult.value = true
+    ElMessage.success(`批量审核已完成：通过 ${res?.summary?.active || 0} / 总 ${res?.summary?.total || 0}`)
+    await loadDrama()
+  } catch (e) {
+    ElMessage.error(e.message || '批量审核失败')
+  } finally {
+    sbReviewingBatch.value = false
+  }
+}
 // P0-1: 连贯帧模式
-const videoFrameContiguity = ref(false)
+const videoFrameContiguity = ref(true)
 // P0-3: 分镜超分辨率 loading set
 const upscalingSbIds = reactive(new Set())
 // P2-3: 场景多视角 loading set
@@ -3401,6 +3718,7 @@ async function loadDrama() {
     generationStyle.value = d.style || ''
     projectAspectRatio.value = (d.metadata && d.metadata.aspect_ratio) ? d.metadata.aspect_ratio : '16:9'
     videoClipDuration.value = (d.metadata && d.metadata.video_clip_duration) ? Number(d.metadata.video_clip_duration) : 5
+    videoResolution.value = (d.metadata && d.metadata.video_resolution) ? String(d.metadata.video_resolution) : '720p'
     storyboardIncludeNarration.value = !!(d.metadata && d.metadata.storyboard_include_narration)
     storyboardUniversalOmni.value = await fetchStoryboardUniversalOmniForLoad(d.metadata)
     const list = d.episodes || []
@@ -3669,6 +3987,7 @@ async function saveProjectSettings(includeGenerationStyle = false) {
     story_style: storyStyle.value || undefined,
     aspect_ratio: projectAspectRatio.value || '16:9',
     video_clip_duration: videoClipDuration.value || 5,
+    video_resolution: videoResolution.value || '720p',
     storyboard_include_narration: !!storyboardIncludeNarration.value,
     storyboard_universal_omni: !!storyboardUniversalOmni.value,
   }
@@ -5051,9 +5370,15 @@ async function onInsertStoryboardBefore(sb) {
   }
 }
 
+function onStopBatchImage() {
+  batchImageStopping.value = true
+  batchSbReviewPipe.stop()
+}
+
 async function startBatchImageGeneration() {
   if (!currentEpisodeId.value || batchImageRunning.value || pipelineRunning.value) return
   batchImageErrors.value = []
+  batchSbReviewErrors.value = []
   batchImageStopping.value = false
   batchImageRunning.value = true
   try {
@@ -5071,12 +5396,32 @@ async function startBatchImageGeneration() {
     const concurrency = pipelineConcurrency.value || 3
     let doneCount = 0
 
-    // 并发执行，使用与 pipeline 相同的并发模型
+    // 启动 SD2 审核池：消费来自生成池的分镜（5 并发）
+    batchSbReviewPipe.start(
+      async (sb) => {
+        const r = await storyboardsAPI.sd2Review(sb.id)
+        const review = r?.seedance2_review
+        if (review?.status === 'failed') {
+          return { ok: false, error: review?.error?.message || review?.error?.code || 'SD2 审核未通过' }
+        }
+        return { ok: true }
+      },
+      {
+        onItemDone: (sb, result) => {
+          if (!result.ok) {
+            batchSbReviewErrors.value.push({ id: sb.id, sbNumber: sb.storyboard_number ?? sb.id, error: result.error })
+          }
+        },
+      }
+    )
+
+    // 生成池：与 pipeline 相同的并发模型，每张图生成成功后 push 给审核池
     let queueIdx = 0
     const worker = async () => {
       while (queueIdx < todo.length) {
         if (batchImageStopping.value) break
         const sb = todo[queueIdx++]
+        let genOk = false
         try {
           const res = await imagesAPI.create({
             storyboard_id: sb.id,
@@ -5091,22 +5436,40 @@ async function startBatchImageGeneration() {
             if (pollRes?.status === 'failed') {
               batchImageErrors.value.push(`#${sb.storyboard_number ?? sb.id}: ${pollRes.error || '生成失败'}`)
               batchImageProgress.value = { ...batchImageProgress.value, failed: batchImageProgress.value.failed + 1 }
+            } else {
+              genOk = true
             }
           } else {
             await loadSingleStoryboardMedia(sb.id)
+            genOk = true
           }
         } catch (e) {
           batchImageErrors.value.push(`#${sb.storyboard_number ?? sb.id}: ${e.message || '提交失败'}`)
           batchImageProgress.value = { ...batchImageProgress.value, failed: batchImageProgress.value.failed + 1 }
+        }
+        if (genOk) {
+          // 生成成功 → 送审核池
+          batchSbReviewPipe.push(sb)
         }
         doneCount++
         batchImageProgress.value = { ...batchImageProgress.value, current: doneCount }
       }
     }
     await Promise.allSettled(Array.from({ length: Math.min(concurrency, todo.length) }, () => worker()))
+
+    // 生成池跑完，标记审核池"不会再有新 item"，等其清空
+    batchSbReviewPipe.close()
+    await batchSbReviewPipe.waitDone()
+
     if (!batchImageStopping.value) {
-      if (batchImageProgress.value.failed === 0) ElMessage.success(`分镜图批量生成完成（共 ${todo.length} 条）`)
-      else ElMessage.warning(`批量完成，${batchImageProgress.value.failed}/${todo.length} 条失败`)
+      const genFailed = batchImageProgress.value.failed
+      const revFailed = batchSbReviewErrors.value.length
+      const revTotal = batchSbReviewPipe.enqueued.value
+      if (genFailed === 0 && revFailed === 0) {
+        ElMessage.success(`分镜图批量生成完成（共 ${todo.length} 条），SD2 审核全部通过`)
+      } else {
+        ElMessage.warning(`批量完成：生成 ${todo.length - genFailed}/${todo.length}，审核 ${revTotal - revFailed}/${revTotal}`)
+      }
     } else {
       ElMessage.info('批量生成已停止')
     }

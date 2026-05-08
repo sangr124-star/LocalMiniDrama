@@ -35,12 +35,15 @@ export const characterAPI = {
   addToMaterialLibrary(characterId) {
     return request.post(`/characters/${characterId}/add-to-material-library`, {})
   },
-  /** 即梦素材库（Seedance 2.0）认证：角色图注册为 asset，供视频生成引用 asset:// */
+  /** Seedance 2.0 内容审核 + 角色锁定（mgate 素材库）：单角色 / 刷新 / 批量 */
   sd2Certify(characterId) {
     return request.post(`/characters/${characterId}/sd2-certify`, {})
   },
   sd2CertifyRefresh(characterId) {
     return request.post(`/characters/${characterId}/sd2-certify/refresh`, {})
+  },
+  sd2CertifyBatch(dramaId, force = false) {
+    return request.post(`/dramas/${dramaId}/characters/sd2-certify-batch${force ? '?force=1' : ''}`, {})
   },
   extractFromImage(characterId) {
     return request.post(`/characters/${characterId}/extract-from-image`, {})
