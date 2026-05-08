@@ -116,7 +116,7 @@ const parsingFile = ref(false)
 const fileInputRef = ref(null)
 const fileName = ref('')
 const rawText = ref('')
-const chapterPattern = ref('^\\s*(第[0-9０-９零一二三四五六七八九十百千万]+[章回节集][^\\n\\r]*)')
+const chapterPattern = ref('^\\s*(第\\s*[0-9０-９零一二三四五六七八九十百千万]+\\s*[章回节集][^\\n\\r]*)')
 const chaptersPerEpisode = ref(1)
 const previewChapters = ref([])
 const previewEpisodes = ref([])
@@ -138,7 +138,7 @@ function resetState() {
   parsingFile.value = false
   fileName.value = ''
   rawText.value = ''
-  chapterPattern.value = '^\\s*(第[0-9０-９零一二三四五六七八九十百千万]+[章回节集][^\\n\\r]*)'
+  chapterPattern.value = '^\\s*(第\\s*[0-9０-９零一二三四五六七八九十百千万]+\\s*[章回节集][^\\n\\r]*)'
   chaptersPerEpisode.value = 1
   previewChapters.value = []
   previewEpisodes.value = []
