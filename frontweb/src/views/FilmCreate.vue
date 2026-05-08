@@ -551,8 +551,25 @@
                       @drop="onResourceDrop($event, 'character', char.id)"
                     >
                       <img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" class="cover-img" alt="" />
+                      <div v-else-if="generatingCharIds.has(char.id)" class="cover-placeholder cover-placeholder--loading" :title="`AI 正在生成（已 ${charImageElapsedText(char.id) || '...'}）`">
+                        <el-skeleton style="width:100%;height:100%" :loading="true" animated>
+                          <template #template>
+                            <el-skeleton-item variant="image" style="width:100%;height:100%" />
+                          </template>
+                        </el-skeleton>
+                      </div>
                       <div v-else-if="char.error_msg || char.errorMsg" class="cover-placeholder error" :title="char.error_msg || char.errorMsg">{{ char.error_msg || char.errorMsg }}</div>
                       <div v-else class="cover-placeholder">暂无图</div>
+                      <!-- SD2 审核状态角标（仅在有图 + 有 seedance2_asset 字段时显示，老数据无字段不显示） -->
+                      <div
+                        v-if="hasAssetImage(char) && char.seedance2_asset && char.seedance2_asset.status"
+                        class="sd2-status-badge"
+                        :class="`sd2-status-badge--${char.seedance2_asset.status}`"
+                        :title="charSd2BadgeTitle(char)"
+                      >
+                        <el-icon><Loading v-if="char.seedance2_asset.status === 'processing'" /><Select v-else-if="char.seedance2_asset.status === 'active'" /><CircleClose v-else-if="char.seedance2_asset.status === 'failed'" /></el-icon>
+                        <span>{{ charSd2BadgeText(char) }}</span>
+                      </div>
                       <div v-if="dragOverResourceKey === 'char-' + char.id" class="asset-cover-drop-hint">松开上传</div>
                     </div>
                     <!-- 额外参考图条 -->
@@ -650,6 +667,13 @@
                       @drop="onResourceDrop($event, 'prop', prop.id)"
                     >
                       <img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" class="cover-img" alt="" />
+                      <div v-else-if="generatingPropIds.has(prop.id)" class="cover-placeholder cover-placeholder--loading" :title="`AI 正在生成（已 ${propImageElapsedText(prop.id) || '...'}）`">
+                        <el-skeleton style="width:100%;height:100%" :loading="true" animated>
+                          <template #template>
+                            <el-skeleton-item variant="image" style="width:100%;height:100%" />
+                          </template>
+                        </el-skeleton>
+                      </div>
                       <div v-else-if="prop.error_msg || prop.errorMsg" class="cover-placeholder error" :title="prop.error_msg || prop.errorMsg">{{ prop.error_msg || prop.errorMsg }}</div>
                       <div v-else class="cover-placeholder">暂无图</div>
                       <div v-if="dragOverResourceKey === 'prop-' + prop.id" class="asset-cover-drop-hint">松开上传</div>
@@ -771,6 +795,13 @@
                       @drop="onResourceDrop($event, 'scene', scene.id)"
                     >
                       <img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" class="cover-img" alt="" />
+                      <div v-else-if="generatingSceneIds.has(scene.id)" class="cover-placeholder cover-placeholder--loading" :title="`AI 正在生成（已 ${sceneImageElapsedText(scene.id) || '...'}）`">
+                        <el-skeleton style="width:100%;height:100%" :loading="true" animated>
+                          <template #template>
+                            <el-skeleton-item variant="image" style="width:100%;height:100%" />
+                          </template>
+                        </el-skeleton>
+                      </div>
                       <div v-else-if="scene.error_msg || scene.errorMsg" class="cover-placeholder error" :title="scene.error_msg || scene.errorMsg">{{ scene.error_msg || scene.errorMsg }}</div>
                       <div v-else class="cover-placeholder">暂无图</div>
                       <div v-if="dragOverResourceKey === 'scene-' + scene.id" class="asset-cover-drop-hint">松开上传</div>
@@ -1247,6 +1278,18 @@
               >
                 <!-- 主图区：最新选中/默认图 > legacy composed_image > 错误 > 空 -->
                 <div class="sb-main-image-wrap">
+                  <!-- 生成中：skeleton 背景层（无图时铺满，有图时不显示）-->
+                  <div
+                    v-if="generatingSbImageIds.has(sb.id) && !getSbImage(sb.id) && !(sb.composed_image || sb.image_url)"
+                    class="sb-skeleton-overlay"
+                    :title="`AI 正在生成（已 ${sbImageElapsedText(sb.id) || '...'}）`"
+                  >
+                    <el-skeleton style="width:100%;height:100%" :loading="true" animated>
+                      <template #template>
+                        <el-skeleton-item variant="image" style="width:100%;height:100%" />
+                      </template>
+                    </el-skeleton>
+                  </div>
                   <template v-if="getSbImage(sb.id)">
                     <img
                       :src="assetImageUrl(getSbImage(sb.id))"
@@ -1256,6 +1299,16 @@
                       @click="openImagePreview(assetImageUrl(getSbImage(sb.id)))"
                     />
                     <div v-if="getSbImage(sb.id).prompt" class="sb-main-img-prompt">{{ getSbImage(sb.id).prompt }}</div>
+                    <!-- SD2 审核状态角标 -->
+                    <div
+                      v-if="sb.seedance2_review && sb.seedance2_review.status"
+                      class="sd2-status-badge"
+                      :class="`sd2-status-badge--${sb.seedance2_review.status}`"
+                      :title="sbSd2BadgeTitle(sb)"
+                    >
+                      <el-icon><Loading v-if="sb.seedance2_review.status === 'processing'" /><Select v-else-if="sb.seedance2_review.status === 'active'" /><CircleClose v-else-if="sb.seedance2_review.status === 'failed'" /></el-icon>
+                      <span>{{ sbSd2BadgeText(sb) }}</span>
+                    </div>
                   </template>
                   <template v-else-if="sb.composed_image || sb.image_url">
                     <img
@@ -1264,6 +1317,15 @@
                       alt=""
                       @click="openImagePreview(imageUrl(sb.composed_image || sb.image_url))"
                     />
+                    <div
+                      v-if="sb.seedance2_review && sb.seedance2_review.status"
+                      class="sd2-status-badge"
+                      :class="`sd2-status-badge--${sb.seedance2_review.status}`"
+                      :title="sbSd2BadgeTitle(sb)"
+                    >
+                      <el-icon><Loading v-if="sb.seedance2_review.status === 'processing'" /><Select v-else-if="sb.seedance2_review.status === 'active'" /><CircleClose v-else-if="sb.seedance2_review.status === 'failed'" /></el-icon>
+                      <span>{{ sbSd2BadgeText(sb) }}</span>
+                    </div>
                   </template>
                   <template v-else-if="sb.error_msg || sb.errorMsg">
                     <div class="sb-image-error" :title="sb.error_msg || sb.errorMsg">{{ sb.error_msg || sb.errorMsg }}</div>
@@ -2399,7 +2461,7 @@ import { ref, computed, onMounted, onBeforeUnmount, reactive, nextTick } from 'v
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Setting, Plus, Minus, Sunny, Moon, MagicStick, Upload, Delete, Check, Loading, WarningFilled, User, Box, Picture, Film, VideoCamera, Document, InfoFilled, Refresh, ZoomIn, QuestionFilled, DocumentAdd, Expand, Fold, VideoPlay } from '@element-plus/icons-vue'
+import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Setting, Plus, Minus, Sunny, Moon, MagicStick, Upload, Delete, Check, Loading, WarningFilled, User, Box, Picture, Film, VideoCamera, Document, InfoFilled, Refresh, ZoomIn, QuestionFilled, DocumentAdd, Expand, Fold, VideoPlay, Select, CircleClose } from '@element-plus/icons-vue'
 import { useTheme } from '@/composables/useTheme'
 import { useElapsedTimer } from '@/composables/useElapsedTimer'
 import { createReviewPipeline } from '@/composables/useBatchPipeline'
@@ -2624,6 +2686,7 @@ const {
   onSd2CertifyRefresh, openCharSd2CertDialog, onSd2CertifyBatch,
   onBatchGenerateAndReview: onBatchGenCharAndReview,
   onBatchGenerateAndReviewStop: onBatchGenCharAndReviewStop,
+  charSd2BadgeText, charSd2BadgeTitle,
   onAddCharFromLibrary,
   charImageElapsedText,
 } = useCharacters({ store, dramaId, currentEpisodeId, getSelectedStyle, loadDrama, pollTask, pollUntilResourceHasImage, hasAssetImage })
@@ -3297,6 +3360,27 @@ function sbMainVideoPlayerKey(sbId) {
 /** 该分镜是否有图（接口拉取的或 composed_image） */
 function hasSbImage(sb) {
   return !!(getSbImage(sb.id) || (sb && (sb.composed_image || sb.image_url)))
+}
+
+/** 分镜 SD2 角标短文本 */
+function sbSd2BadgeText(sb) {
+  const s = sb?.seedance2_review?.status
+  if (s === 'active') return '已通过'
+  if (s === 'failed') return '未通过'
+  if (s === 'processing') return '审核中'
+  return ''
+}
+
+/** 分镜 SD2 角标 hover 提示 */
+function sbSd2BadgeTitle(sb) {
+  const s = sb?.seedance2_review?.status
+  if (s === 'active') return 'SD2 内容审核已通过'
+  if (s === 'failed') {
+    const msg = sb?.seedance2_review?.error?.message
+    return msg ? `SD2 审核未通过：${msg}` : 'SD2 内容审核未通过'
+  }
+  if (s === 'processing') return 'SD2 审核处理中，请稍候'
+  return ''
 }
 /** 取该分镜下所有已完成的非四宫格图片列表 */
 function getSbAllImages(storyboardId) {
@@ -7632,6 +7716,56 @@ html.light .section-desc { color: #6b7280; }
   word-break: break-all;
   text-align: center;
 }
+/* 生成中：el-skeleton 占满整张图，padding=0，避免内边距 */
+.cover-placeholder--loading {
+  padding: 0;
+}
+.cover-placeholder--loading :deep(.el-skeleton) {
+  width: 100%;
+  height: 100%;
+}
+.cover-placeholder--loading :deep(.el-skeleton__image) {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+/* SD2 内容审核状态角标（叠在图片右上角） */
+.sd2-status-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: auto;
+  cursor: help;
+  z-index: 2;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+.sd2-status-badge .el-icon { font-size: 0.85rem; }
+.sd2-status-badge--processing {
+  background: rgba(245, 158, 11, 0.95);
+  color: #fff;
+}
+.sd2-status-badge--processing .el-icon { animation: sd2-badge-spin 1.4s linear infinite; }
+.sd2-status-badge--active {
+  background: rgba(34, 197, 94, 0.95);
+  color: #fff;
+}
+.sd2-status-badge--failed {
+  background: rgba(239, 68, 68, 0.95);
+  color: #fff;
+}
+@keyframes sd2-badge-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 .sb-image-error {
   width: 100%;
   flex: 1;
@@ -8375,7 +8509,28 @@ html.light .sb-ctrl-mode-btn.el-button:hover {
   align-items: center;
   justify-content: center;
   min-height: 80px;
+  position: relative;
 }
+/* 分镜图生成中：skeleton overlay 铺满主图区域 */
+.sb-skeleton-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.sb-skeleton-overlay :deep(.el-skeleton) {
+  width: 100%;
+  height: 100%;
+}
+.sb-skeleton-overlay :deep(.el-skeleton__image) {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+}
+/* 让生成按钮浮在 skeleton 之上 */
+.sb-main-image-wrap .sb-gen-btn,
+.sb-main-image-wrap .el-button { z-index: 1; position: relative; }
 /* 主图下方提示词预览 */
 .sb-main-img-prompt {
   width: 100%;

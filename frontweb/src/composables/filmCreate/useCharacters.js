@@ -453,6 +453,27 @@ export function useCharacters(deps) {
     return 'warning'
   }
 
+  /** 角标短文本（用在图片右上角小标）*/
+  function charSd2BadgeText(char) {
+    const s = char?.seedance2_asset?.status
+    if (s === 'active') return '已通过'
+    if (s === 'failed') return '未通过'
+    if (s === 'processing') return '审核中'
+    return ''
+  }
+
+  /** 角标 hover 提示（带错误原因）*/
+  function charSd2BadgeTitle(char) {
+    const s = char?.seedance2_asset?.status
+    if (s === 'active') return 'SD2 内容审核已通过'
+    if (s === 'failed') {
+      const msg = char?.seedance2_asset?.error?.message
+      return msg ? `SD2 审核未通过：${msg}` : 'SD2 内容审核未通过'
+    }
+    if (s === 'processing') return 'SD2 审核处理中，请稍候'
+    return ''
+  }
+
   function charSd2TagText(char) {
     const s = char?.seedance2_asset?.status
     if (s === 'active') return '已通过 SD2 内容审核'
@@ -786,6 +807,8 @@ export function useCharacters(deps) {
     onSd2CertifyBatch,
     onBatchGenerateAndReview,
     onBatchGenerateAndReviewStop,
+    charSd2BadgeText,
+    charSd2BadgeTitle,
     onAddCharFromLibrary,
   }
 }
