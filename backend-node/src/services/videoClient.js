@@ -625,6 +625,46 @@ async function callModelGateVideoApi(config, log, opts) {
 
   // 轮询：5s × 240 = 20min（实测 5s/720p 视频 ~2.5min；更长/更高分辨率留余量）
   const queryFn = () => mgate.postJson(config, '/ai_router/video_generations_query', { task_id: taskId });
+
+  /** 把 mgate / 上游视频原始英文错误翻译为对用户友好的中文提示。无法识别返回 ''（caller 兜底） */
+  function translateMgateVideoError(rawMsg) {
+    const s = String(rawMsg || '');
+    if (!s) return '';
+    // 版权/IP 限制（截图实测：output video may be related to copyright restrictions）
+    if (/copyright|trademark|intellectual[_ -]?property|ip[_ -]?infringement/i.test(s)) {
+      return '生成的视频可能涉及版权 / 商标，已被上游拒绝。请尝试避免知名 IP / 商标元素，调整提示词后重试';
+    }
+    // 真人脸：input image may contain real person
+    if (/real[_ -]?person|real[_ -]?face|contain.*person/i.test(s)) {
+      return '输入的参考图或首帧图含真实人脸，已被上游拒绝。请使用 AI 生成的人物图或非真实人物';
+    }
+    // 安全审核（暴力/色情/政治等）
+    if (/safety_violations|moderation_blocked|rejected by the safety system|sensitive[_ -]?content|content[_ -]?policy|policy[_ -]?violation|violation.*platform[_ -]?rules?/i.test(s)) {
+      const tags = [];
+      if (/violence/i.test(s)) tags.push('暴力');
+      if (/sexual|porn/i.test(s)) tags.push('色情');
+      if (/hate/i.test(s)) tags.push('仇恨');
+      if (/self[-_ ]?harm/i.test(s)) tags.push('自残');
+      if (/minors?|child/i.test(s)) tags.push('未成年');
+      if (/political|politic/i.test(s)) tags.push('政治');
+      const tagStr = tags.length ? `（涉及：${tags.join('、')}）` : '';
+      return `提示词或参考图触发了上游内容安全审核${tagStr}，请修改后重试`;
+    }
+    // 火山豆包侧的内容审核（与 image 版对齐）
+    if (/InputVideoSensitiveContentDetected|InputTextSensitiveContentDetected|OutputVideoSensitiveContentDetected|PolicyViolation/i.test(s)) {
+      return '提示词或参考图触发了上游内容安全审核，请修改后重试';
+    }
+    // 配额 / 限流
+    if (/quota|limit|rate/i.test(s) && /(exceed|reach|too many)/i.test(s)) {
+      return '上游配额或并发已达上限，请稍后重试';
+    }
+    // 网络/超时
+    if (/timeout|deadline/i.test(s)) return '上游处理超时，请重试';
+    if (/connection|network/i.test(s)) return '上游网络异常，请重试';
+    // 不识别 → 返回空让 caller 拼通用文案
+    return '';
+  }
+
   const result = await mgate.pollUntilDone(queryFn, {
     maxAttempts: 240,
     intervalMs: 5000,
@@ -641,14 +681,19 @@ async function callModelGateVideoApi(config, log, opts) {
     isFailed: (body) => {
       const st = body?.status || body?.Response?.Status;
       if (st === 'failed' || st === 'cancelled' || st === 'expired' || st === 'ABORTED') {
-        const msg = body?.error?.message || body?.Response?.AigcVideoTask?.Message || st;
-        return `mgate 视频任务失败 (${st}): ${msg}`;
+        const rawMsg = body?.error?.message || body?.Response?.AigcVideoTask?.Message || '';
+        const friendly = translateMgateVideoError(rawMsg);
+        if (friendly) return friendly;
+        return rawMsg ? `视频生成失败：${rawMsg}` : `视频生成失败（${st}）`;
       }
       return false;
     },
   });
   if (!result.ok) {
     log.error('[mgate-vid] 任务失败/超时', { video_gen_id, error: result.error });
+    if (/任务轮询超时/.test(result.error || '')) {
+      return { error: '上游处理超过 20 分钟仍未返回，可能因视频服务繁忙，请稍后重试' };
+    }
     return { error: result.error };
   }
   const b = result.body || {};
