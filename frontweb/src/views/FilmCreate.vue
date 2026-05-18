@@ -1694,7 +1694,7 @@
         <el-form-item label="简介">
           <el-input v-model="editCharacterForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="角色背景简介，供剧本生成参考" />
         </el-form-item>
-        <el-form-item v-if="editCharacterForm.id && isSuperAdmin">
+        <el-form-item v-if="editCharacterForm.id">
           <template #label>
             <span style="font-size:12px;line-height:1.4;white-space:normal;word-break:break-all;display:inline-block;width:90px">图生提示词</span>
           </template>
@@ -1903,7 +1903,7 @@
         <el-form-item label="描述">
           <el-input v-model="editPropForm.description" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="道具描述" />
         </el-form-item>
-        <el-form-item v-if="isSuperAdmin" label="图生提示词">
+        <el-form-item label="图生提示词">
           <div style="width:100%">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
               <span style="font-size:12px;color:#909399">AI 润色后的图片提示词，生成图片时直接使用；可手动修改</span>
@@ -1962,7 +1962,7 @@
         <el-form-item label="场景描述">
           <el-input v-model="editSceneForm.prompt" type="textarea" :autosize="{ minRows: 3, maxRows: 8 }" placeholder="场景的简要描述，供 AI 生成四视图时参考" />
         </el-form-item>
-        <el-form-item v-if="editSceneForm.id && isSuperAdmin">
+        <el-form-item v-if="editSceneForm.id">
           <template #label>
             <span style="font-size:12px;line-height:1.4;white-space:normal;word-break:break-all;display:inline-block;width:90px">四视图提示词</span>
           </template>
